@@ -177,13 +177,15 @@ max_height = scdfs["Nuclei_AreaShape_BoundingBoxDelta_Y"].max()
 
 g = sns.jointplot(data=pd.concat([scdfs, pre_scdfs], axis=0), x="Nuclei_AreaShape_BoundingBoxDelta_X", y="Nuclei_AreaShape_BoundingBoxDelta_Y", hue="Metadata_Filtering", palette={"Removed Cells": 'blue', "Retained Cells": 'purple'})
 g.fig.set_size_inches(18, 10)
-g.set_axis_labels("Bounding Box Height (Pixels)", "Bounding Box Length (Pixels)")
-g.fig.suptitle("Distribution of Bounding Box Sizes")
+g.set_axis_labels("Bounding Box Height (Pixels)", "Bounding Box Length (Pixels)", fontsize=13)
+g.fig.suptitle("Distribution of Bounding Box Sizes", fontsize=16)
 
 g.ax_joint.axvline(max_height, color='black', linestyle='--', label="Nuclei Height Threshold")
 g.ax_joint.axhline(max_length, color='red', linestyle='--', label='Nuclei Length Threshold')
 
-g.ax_joint.legend()
+g.ax_joint.tick_params(axis='x', labelsize=12)  # X axis tick label font size
+g.ax_joint.tick_params(axis='y', labelsize=12)
+g.ax_joint.legend(fontsize=12)
 
 plt.savefig(filtered_sc_figure_path / "nuclei_dimension_distributions.png")
 plt.show()
