@@ -1,0 +1,55 @@
+---
+repos:
+
+  # isort for jupyter notebooks
+  #- repo: https://github.com/nbQA-dev/nbQA
+  #rev: 1.3.1
+  #hooks:
+  #- id: nbqa-black
+
+  # remove unused imports
+  - repo: https://github.com/hadialqattan/pycln.git
+    rev: v2.1.3
+    hooks:
+    - id: pycln
+      name: pycln
+      description: "A formatter for finding and removing unused import statements."
+      entry: pycln -a *.py
+      language: python
+      language_version: python3
+      types: [python]
+
+        #- repo: https://github.com/PyCQA/autoflake
+        #rev: v2.2.0
+        #hooks:
+        #- id: autoflake
+        #name: autoflake
+        #entry: autoflake
+        #language: python
+        #"types": [python]
+        #require_serial: true
+        #args:
+        #- "--in-place"
+        #- "--remove-unused-variables"
+
+  # Code formatter for both python files and jupyter notebooks
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: ["--profile", "black", "--filter-files"]
+
+  # additional hooks found with in the pre-commit lib
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: trailing-whitespace # removes trailing white spaces
+      - id: mixed-line-ending # removes mixed end of line
+        args:
+          - --fix=lf
+      - id: pretty-format-json # JSON Formatter
+        args:
+          - --autofix
+          - --indent=4
+          - --no-sort-keys
