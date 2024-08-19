@@ -62,7 +62,7 @@ scdfs = [pd.read_parquet(sc_path) for sc_path in sc_profiles_path if sc_path.is_
 
 
 filtered_sc_path = pathlib.Path("filtered_single_cells")
-filtered_sc_figure_path = filtered_sc_path / "filtered_sc_figures"
+filtered_sc_figure_path = filtered_sc_path / "filtered_single_cell_figures"
 
 filtered_sc_figure_path.mkdir(parents=True, exist_ok=True)
 
@@ -114,7 +114,7 @@ common_cols = set(scdfs[0].columns[scdfs[0].columns.str.contains('Metadata')])
 for scdf in scdfs[1:]:
     common_cols = set(scdf.columns[scdf.columns.str.contains('Metadata')]) & set(scdf.columns)
 
-scdfs = pd.concat(scdfs, axis=0)[list(common_cols) + bounding_box_cols]
+scdfs = pd.concat(scdfs, axis=0)[list(common_cols) + bounding_box_cols].reset_index()
 
 
 # ## Calculate Bounding Box Dimensions
@@ -139,13 +139,8 @@ scdfs.head()
 
 
 pre_filter_sc_count = scdfs.shape[0]
-
-g = sns.jointplot(data=scdfs, x="Nuclei_AreaShape_BoundingBoxDelta_X", y="Nuclei_AreaShape_BoundingBoxDelta_Y")
-g.fig.set_size_inches(18, 10)
-g.set_axis_labels("Bounding Box Height (Pixels)", "Bounding Box Length (Pixels)")
-g.fig.suptitle("Distribution of Bounding Box Sizes before Filtering")
-plt.savefig(filtered_sc_figure_path / "nuclei_dimension_distributions_before_filtering.png")
-plt.show()
+pre_scdfs = scdfs.copy()
+pre_scdfs["Metadata_Filtering"] = "Removed Cells"
 
 
 # ## Filter Nuclei by Height and Length
@@ -156,7 +151,8 @@ plt.show()
 scdfs = filter_bounding_box_size(_scdf=scdfs, _bounding_box_col="Nuclei_AreaShape_BoundingBoxDelta_X")
 scdfs = filter_bounding_box_size(_scdf=scdfs, _bounding_box_col="Nuclei_AreaShape_BoundingBoxDelta_Y")
 
-scdfs.filter(like="Metadata").to_parquet(filtered_sc_path / "filtered_single_cell_profiles.parquet")
+scdfs.filter(like="Metadata").to_parquet(filtered_sc_path / "filtered_single_cell_profiles.parquet", index=False)
+scdfs["Metadata_Filtering"] = "Retained Cells"
 
 
 # In[11]:
@@ -174,10 +170,21 @@ print(f"\nNumber of single cells removed after filtering by bounding box size:\n
 # In[13]:
 
 
-g = sns.jointplot(data=scdfs, x="Nuclei_AreaShape_BoundingBoxDelta_X", y="Nuclei_AreaShape_BoundingBoxDelta_Y")
+pre_scdfs = pre_scdfs.loc[~pre_scdfs.index.isin(scdfs.index)]
+
+max_length = scdfs["Nuclei_AreaShape_BoundingBoxDelta_X"].max()
+max_height = scdfs["Nuclei_AreaShape_BoundingBoxDelta_Y"].max()
+
+g = sns.jointplot(data=pd.concat([scdfs, pre_scdfs], axis=0), x="Nuclei_AreaShape_BoundingBoxDelta_X", y="Nuclei_AreaShape_BoundingBoxDelta_Y", hue="Metadata_Filtering", palette={"Removed Cells": 'blue', "Retained Cells": 'purple'})
 g.fig.set_size_inches(18, 10)
 g.set_axis_labels("Bounding Box Height (Pixels)", "Bounding Box Length (Pixels)")
-g.fig.suptitle("Distribution of Bounding Box Sizes after Filtering")
-plt.savefig(filtered_sc_figure_path / "nuclei_dimension_distributions_after_filtering.png")
+g.fig.suptitle("Distribution of Bounding Box Sizes")
+
+g.ax_joint.axvline(max_height, color='black', linestyle='--', label="Nuclei Height Threshold")
+g.ax_joint.axhline(max_length, color='red', linestyle='--', label='Nuclei Length Threshold')
+
+g.ax_joint.legend()
+
+plt.savefig(filtered_sc_figure_path / "nuclei_dimension_distributions.png")
 plt.show()
 
