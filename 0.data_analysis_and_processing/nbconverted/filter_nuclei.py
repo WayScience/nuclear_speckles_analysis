@@ -3,7 +3,7 @@
 
 # # Filter Single-Cell Profiles
 # Single-cell profiles are filtered by nuclei bounding box dimensions across all plates.
-# Filtered is accomplished with robust z-score thresholding of nuclei bounding box dimensions.
+# Filtered is accomplished with robust z-score thresholding of nuclei bounding box dimensions obtained from cellprofiler.
 
 # In[1]:
 
