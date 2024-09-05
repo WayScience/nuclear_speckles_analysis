@@ -3,7 +3,7 @@
 
 # # Train ElasticNet model to predict each A647 and GOLD feature using the nuclear features
 # 
-# In this notebook, we split the features into each group for nuclear speckle or nucleus and then train a model per nuclear speckle feature using the nuclear features to predict it.
+# In this notebook, we split the features into each group for nuclear speckle or nucleus and then train a regression model per nuclear speckle feature using the nuclear features to predict it.
 # 
 # We are looking to find the best nuclear speckle feature that can be predicted using nucleus features.
 
@@ -12,15 +12,18 @@
 # In[1]:
 
 
+import os
+import sys
+import warnings
+
+import joblib
+import numpy as np
 import pandas as pd
 import pathlib
-import numpy as np
-import joblib
 from sklearn.linear_model import ElasticNet
 from sklearn.model_selection import KFold, RandomizedSearchCV
-import warnings
-import sys
-import os
+from tqdm import tqdm
+
 # Ignore the ConvergenceWarnings (only thing that will work 🙃)
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
@@ -52,7 +55,7 @@ shuffled_dir.mkdir(exist_ok=True, parents=True)
 
 
 # load in training data
-training_df = pd.read_csv(pathlib.Path("./data/training_data.csv"))
+training_df = pd.read_parquet(pathlib.Path("./data/training_data.parquet"))
 
 # Initialize lists to store column names for each feature group
 nucleus_features = []
@@ -147,7 +150,7 @@ random_search_params = {
 # Suppress all warnings
 warnings.filterwarnings("ignore")
 
-for a647_feature in a647_features:
+for a647_feature in tqdm(a647_features, desc="Processing A647 Features"):
     y = training_df[a647_feature]
 
     # Train regular model with hyperparameter tuning
@@ -182,7 +185,7 @@ print("All A647 models have been trained and tuned!")
 # In[6]:
 
 
-for gold_feature in gold_features:
+for gold_feature in tqdm(gold_features, desc="Processing GOLD Features"):
     y = training_df[gold_feature]
 
     # Train regular model with hyperparameter tuning

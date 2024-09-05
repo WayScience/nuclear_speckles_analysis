@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# ## Split data into training, testing, and holdout sets
+# 
+# In this notebook, we use the normalized profiles to train regression models to predict each individual feature from each nuclear speckle stain (A647 and GOLD).
+# We first have to remove any columns with NaN values and remove single-cells that are not included in the [filtered single cells file](../0.data_analysis_and_processing/filtered_single_cells/filtered_single_cell_profiles.parquet).
+# The filtering was performed in the previous module where any single-cell crop had a height and width outside of a designated range was removed.
+# We remove those single-cells in our method to ensure that both modelling methods use the same data.
+
 # ## Import libraries
 
 # In[1]:
@@ -73,13 +80,9 @@ columns_to_match = [
     'Metadata_Nuclei_Location_Center_X', 'Metadata_Nuclei_Location_Center_Y'
 ]
 
-# ensure both dataframes have these columns
-combined_df_filtered = combined_df[columns_to_match]
-filtering_df_filtered = filtering_df[columns_to_match]
-
 # convert rows to tuples
-filtering_tuples = set(tuple(row) for row in filtering_df_filtered.itertuples(index=False))
-combined_df_tuples = combined_df_filtered.apply(tuple, axis=1)
+filtering_tuples = set(tuple(row) for row in filtering_df[columns_to_match].itertuples(index=False))
+combined_df_tuples = combined_df[columns_to_match].apply(tuple, axis=1)
 
 # create a boolean mask for rows in combined_df that match any rows in filtering_df
 mask = combined_df_tuples.isin(filtering_tuples)
@@ -106,8 +109,8 @@ data_dir.mkdir(exist_ok=True)
 # holdout all cells from the 293T cell line as CSV
 holdout_data = filtered_combined_df[filtered_combined_df['Metadata_CellLine'] == '293T']
 
-# Save the holdout data to a CSV file
-holdout_data.to_csv(f"{data_dir}/holdout_data_293T.csv", index=False)
+# Save the holdout data to a parquet file
+holdout_data.to_parquet(f"{data_dir}/holdout_data_293T.parquet", index=False)
 
 # Print the shape of holdout_data to verify
 print(holdout_data.shape)
@@ -129,9 +132,9 @@ train_data, test_data = train_test_split(
     shuffle=True     # Ensure data is shuffled before splitting
 )
 
-# Save the training and testing data to CSV files
-train_data.to_csv(f"{data_dir}/training_data.csv", index=False)
-test_data.to_csv(f"{data_dir}/testing_data.csv", index=False)
+# Save the training and testing data to parquet files
+train_data.to_parquet(f"{data_dir}/training_data.parquet", index=False)
+test_data.to_parquet(f"{data_dir}/testing_data.parquet", index=False)
 
 # Print the shapes of the splits to verify
 print(f"Training data shape: {train_data.shape}")
