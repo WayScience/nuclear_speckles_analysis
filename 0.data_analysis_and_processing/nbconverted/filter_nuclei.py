@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-
 # ## Find the root of the git repo on the host system
 
 # In[2]:

@@ -1,0 +1,5 @@
+# Ignore models folder since there are a lot of them (>600)
+models*
+
+# Ignore data splits due to large size
+data*
