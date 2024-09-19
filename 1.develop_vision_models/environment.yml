@@ -1,0 +1,30 @@
+name: speckle_analysis
+channels:
+  - anaconda
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - conda-forge::python=3.11
+  - conda-forge::pip
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch::pytorch-cuda=12.1
+  - conda-forge::seaborn
+  - conda-forge::matplotlib
+  - conda-forge::jupyter
+  - conda-forge::pre_commit
+  - conda-forge::pandas
+  - conda-forge::pillow
+  - conda-forge::numpy
+  - conda-forge::pathlib2
+  - conda-forge::scikit-learn
+  - conda-forge::opencv
+  - conda-forge::pyarrow
+  - conda-forge::ipython
+  - conda-forge::notebook
+  - conda-forge::albumentations
+  - conda-forge::optuna
+  - pip:
+    - mlflow
