@@ -9,18 +9,18 @@
 
 
 import pathlib
-
-import pandas as pd
-import numpy as np
 import random
+import sys
+from collections import defaultdict
+
+import albumentations as A
+import matplotlib.pyplot as plt
+import mlflow
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import mlflow
-import matplotlib.pyplot as plt
-import sys
-import albumentations as A
-from collections import defaultdict
 
 
 # ## Find the root of the git repo on the host system
@@ -53,11 +53,11 @@ if root_dir is None:
 
 sys.path.append(str((root_dir / "1.develop_vision_models").resolve(strict=True)))
 
+from ImageDataset import ImageDataset
 from models.fnet_nn_2d import Net
 from ModelTrainer import ModelTrainer
-from ImageDataset import ImageDataset
-from transforms.StandardScaler import StandardScaler
 from transforms.CropNPixels import CropNPixels
+from transforms.StandardScaler import StandardScaler
 
 
 # ## Set random seeds
@@ -207,8 +207,8 @@ mlflow.log_param("Training Loss", backprop_loss_name)
 
 trainer_params = {
     "_batch_size": 32,
-    "_epochs": 2,
-    "_patience": 1
+    "_epochs": 2_000,
+    "_patience": 15
 }
 
 
@@ -232,6 +232,7 @@ trainer.train()
 
 
 # # Generate Images
+# Evaluate the model by generating the same number of example images for each siRNA.
 
 # In[2]:
 
