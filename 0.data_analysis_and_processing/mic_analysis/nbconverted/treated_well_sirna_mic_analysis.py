@@ -116,9 +116,9 @@ print(scdfs)
 # In[9]:
 
 
-gold_scdfs = scdfs.loc[:, ~scdfs.columns.str.contains("DAPI|A647", regex=True)]
-a647_scdfs = scdfs.loc[:, ~scdfs.columns.str.contains("DAPI|GOLD", regex=True)]
-dapi_scdfs = scdfs.loc[:, ~scdfs.columns.str.contains("A647|GOLD", regex=True)]
+gold_scdfs = scdfs.loc[:, scdfs.columns.str.contains("GOLD|Metadata", regex=True)]
+a647_scdfs = scdfs.loc[:, scdfs.columns.str.contains("A647|Metadata", regex=True)]
+dapi_scdfs = scdfs.loc[:, scdfs.columns.str.contains("DAPI|Metadata", regex=True)]
 
 gold_scdfs.columns = gold_scdfs.columns.str.replace('_GOLD', '', regex=False)
 a647_scdfs.columns = gold_scdfs.columns.str.replace('_A647', '', regex=False)
