@@ -5,13 +5,14 @@
 # The 2d fnet architecture (https://doi.org/10.1038/s41592-018-0111-2) is trained to predict the GOLD stain from cropped DAPI Nuclei Images.
 # This model was trained on a similar task, therefore, we are interested in model's performance when trained on our task.
 
-# In[ ]:
+# In[1]:
 
 
 import pathlib
 import random
 import sys
 from collections import defaultdict
+from typing import Tuple
 
 import albumentations as A
 import matplotlib.pyplot as plt
@@ -25,7 +26,7 @@ import torch.optim as optim
 
 # ## Find the root of the git repo on the host system
 
-# In[ ]:
+# In[2]:
 
 
 # Get the current working directory
@@ -48,7 +49,7 @@ if root_dir is None:
 
 # ## Custom Imports
 
-# In[ ]:
+# In[3]:
 
 
 sys.path.append(str((root_dir / "1.develop_vision_models").resolve(strict=True)))
@@ -62,7 +63,7 @@ from transforms.StandardScaler import StandardScaler
 
 # ## Set random seeds
 
-# In[1]:
+# In[4]:
 
 
 random.seed(0)
@@ -73,17 +74,17 @@ mlflow.log_param("random_seed", 0)
 
 # # Inputs
 
-# In[ ]:
+# In[5]:
 
 
 # Nuclei crops path of treated nuclei in the Dapi channel with all original pixel values
-treated_dapi_crops = root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops"
+treated_dapi_crops = (root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops").resolve(strict=True)
 
 # Nuclei crops path of nuclei in the Gold channel with all original pixel values
-gold_crops = root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei"
+gold_crops = (root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei").resolve(strict=True)
 
 # Paths to original nuclear speckle data
-data_dir = root_dir / "nuclear_speckles_data"
+data_dir = (root_dir / "nuclear_speckles_data").resolve(strict=True)
 nuclear_mask_dir = (data_dir / "Nuclear_masks").resolve(strict=True)
 sc_profiles_path = list((data_dir / "Preprocessed_data/single_cell_profiles").resolve(strict=True).glob("*feature_selected*.parquet"))
 
@@ -94,10 +95,10 @@ scdfs = pd.concat(scdfs, axis=0).reset_index(drop=True)
 
 # # Outputs
 
-# In[ ]:
+# In[6]:
 
 
-figure_path = pathlib.Path("fnet_validation_images_temp")
+figure_path = pathlib.Path("fnet_validation_images")
 figure_path.mkdir(parents=True, exist_ok=True)
 
 metrics_path = pathlib.Path("metrics")
@@ -107,7 +108,7 @@ model_path = pathlib.Path("model")
 model_path.mkdir(parents=True, exist_ok=True)
 
 
-# In[ ]:
+# In[7]:
 
 
 description = "Here we leverage the 2d fnet architecture in https://doi.org/10.1038/s41592-018-0111-2 to predict the GOLD stain from cropped DAPI Nuclei Images. We retain all pixel values in the cropped images"
@@ -116,10 +117,10 @@ mlflow.set_tag("mlflow.note.content", description)
 
 # # Image Generation Functions
 
-# In[ ]:
+# In[8]:
 
 
-def format_img(_tensor_img):
+def format_img(_tensor_img: torch.Tensor) -> np.ndarray:
     """Reshapes an image and rescales pixel values from the StandardScaler transform."""
 
     mean = trainer.val_dataset.dataset.input_transform[0].mean
@@ -128,10 +129,10 @@ def format_img(_tensor_img):
     return (torch.squeeze(_tensor_img) * std + mean).to(torch.uint16).cpu().numpy()
 
 
-# In[ ]:
+# In[9]:
 
 
-def evaluate_and_format_imgs(_input, _target):
+def evaluate_and_format_imgs(_input: torch.Tensor, _target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     single_input = input.unsqueeze(1).to(device)
     single_target = target.to(device)
@@ -146,7 +147,7 @@ def evaluate_and_format_imgs(_input, _target):
 
 # # Initialize and Train Model
 
-# In[ ]:
+# In[10]:
 
 
 transforms = A.Compose([
@@ -162,7 +163,7 @@ img_dataset = ImageDataset(
 )
 
 
-# In[ ]:
+# In[11]:
 
 
 model = Net()
@@ -171,7 +172,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 
 
-# In[ ]:
+# In[12]:
 
 
 optim_params = {
@@ -188,7 +189,7 @@ mlflow.log_param("Optimizer", "ADAM")
 mlflow.log_params(optim_params)
 
 
-# In[ ]:
+# In[13]:
 
 
 # These keys will be in the names of the logged losses
@@ -202,7 +203,7 @@ backprop_loss_name = "mae loss"
 mlflow.log_param("Training Loss", backprop_loss_name)
 
 
-# In[ ]:
+# In[14]:
 
 
 trainer_params = {
@@ -212,7 +213,7 @@ trainer_params = {
 }
 
 
-# In[ ]:
+# In[15]:
 
 
 trainer = ModelTrainer(
@@ -225,7 +226,7 @@ trainer = ModelTrainer(
 )
 
 
-# In[ ]:
+# In[16]:
 
 
 trainer.train()
@@ -234,7 +235,7 @@ trainer.train()
 # # Generate Images
 # Evaluate the model by generating the same number of example images for each siRNA.
 
-# In[2]:
+# In[17]:
 
 
 example_images_per_sirna = 10
@@ -290,7 +291,7 @@ for input, target in iter(trainer.val_dataset):
 
 # # Log Metrics and Model
 
-# In[ ]:
+# In[18]:
 
 
 client = mlflow.MlflowClient()
@@ -310,10 +311,10 @@ metricsdf["epoch"] = np.arange(metricsdf.shape[0])
 metricsdf.to_csv(metrics_path / "fnet_metrics_per_epoch.csv", index=False)
 
 
-# In[3]:
+# In[19]:
 
 
-mlflow.pytorch.log_model(pytorch_model=model.cpu(), artifact_path="model", conda_env=str(root_dir / "environment.yml"))
+mlflow.pytorch.log_model(pytorch_model=model.cpu(), artifact_path="model", conda_env=str(root_dir / "1.develop_vision_models" / "environment.yml"))
 
 # Save model for github
 torch.save(model.state_dict(), model_path / "fnet_model_states.pth")
