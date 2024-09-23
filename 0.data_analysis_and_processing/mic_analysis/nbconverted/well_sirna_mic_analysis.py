@@ -2,8 +2,11 @@
 # coding: utf-8
 
 # # Evaluate Well Stain Relationship Strength
-# This analysis compares Maximal Information Coefficient (MIC) scores between the same DAPI and GOLD aggregated well features per well.
+# This analysis compares Maximal Information Coefficient (MIC) scores between the same DAPI and nuclear speckle stain (A647 or GOLD) aggregated well features per well.
 # Distributions of these MIC scores are visualized, between zero and one, where one indicates a perfect relationship and zero indicates no relationship.
+# From this analysis we can underastand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
+# With these insights we may further improve or stain feature regression and stain translation models.
+# We save additional experimental details in a manifest for further evaluation.
 
 # In[1]:
 
@@ -71,7 +74,7 @@ scdfs = [pd.read_parquet(sc_path) for sc_path in sc_profiles_path if sc_path.is_
 # In[5]:
 
 
-distribution_figures_path = pathlib.Path("treated_well_sirna_mic_distribution_figures")
+distribution_figures_path = pathlib.Path("well_sirna_mic_distribution_figures")
 distribution_figures_path.mkdir(parents=True, exist_ok=True)
 
 mic_comparisons_path = pathlib.Path("mic_comparisons_data")
@@ -93,27 +96,17 @@ for scdf in scdfs[1:]:
 scdfs = pd.concat(scdfs, axis=0)[common_columns]
 
 
-# ## Retain Useful Morphologies
-
 # In[7]:
 
 
 scdfs.dropna(inplace=True)
 
-# We aren't analyzing the other nuclear speckle stain (A647)
-# Bounding Box features don't describe cell morphologies
-scdfs = scdfs.drop(columns=[col for col in scdfs.columns if "BoundingBox" in col])
-
-
-# In[8]:
-
-
 print(scdfs)
 
 
-# ## Seperate Gold and Dapi Features
+# ## Seperate Gold, A647, and Dapi Features
 
-# In[9]:
+# In[8]:
 
 
 gold_scdfs = scdfs.loc[:, scdfs.columns.str.contains("GOLD|Metadata", regex=True)]
@@ -127,7 +120,7 @@ dapi_scdfs.columns = dapi_scdfs.columns.str.replace('_DAPI', '', regex=False)
 
 # ## Combine Seperated Stain Features
 
-# In[10]:
+# In[9]:
 
 
 gold_scdfs = gold_scdfs.assign(Metadata_Stain="GOLD")
@@ -137,13 +130,10 @@ a647_scdfs = a647_scdfs.assign(Metadata_Stain="A647")
 common_cols = gold_scdfs.columns.intersection(dapi_scdfs.columns).intersection(a647_scdfs.columns)
 scdfs = pd.concat([gold_scdfs[common_cols], dapi_scdfs[common_cols], a647_scdfs[common_cols]], axis=0)
 
-# We are only comparing stains within treated wells
-scdfs_treated = scdfs.loc[scdfs["Metadata_Condition"] != "untreated"]
-
 
 # ## Specify Feature Metadata Columns
 
-# In[11]:
+# In[10]:
 
 
 feat_cols = scdfs.columns[~scdfs.columns.str.contains("Metadata")]
@@ -151,28 +141,32 @@ feat_cols = scdfs.columns[~scdfs.columns.str.contains("Metadata")]
 
 # ## Mean Aggregation to the Well Level
 
-# In[12]:
+# In[11]:
 
+
+# Define Placeholder Column
+scdfs["Metadata_Cell_Count"] = scdfs["Metadata_Condition"].values
 
 # Metadata to retain
 agg_funcs = {
     "Metadata_Condition": "first",
+    "Metadata_Cell_Count": "size"
 }
 
 agg_funcs |= {feat_col: "mean" for feat_col in feat_cols}
-scdfs_treated = scdfs_treated.groupby(["Metadata_Plate", "Metadata_Well", "Metadata_Stain"]).agg(agg_funcs).reset_index()
+staindf = scdfs.groupby(["Metadata_Plate", "Metadata_Well", "Metadata_Stain"]).agg(agg_funcs).reset_index()
 
 
-# In[13]:
+# In[12]:
 
 
-print(scdfs_treated)
+print(staindf)
 
 
 # # MIC Comparisons
-# Compares MIC scores between stains of the same well.
+# Compares MIC scores between DAPI and nuclear speckle stains of the same well.
 
-# In[14]:
+# In[13]:
 
 
 micdfs = []
@@ -188,10 +182,10 @@ for stain in speckle_stains:
             # Shuffles the samples/features depending on your perspective
             mic_comparator = ShuffledMIC()
 
-        speckle_stain_treatedf = scdfs_treated.loc[scdfs_treated["Metadata_Stain"] != stain]
+        speckle_staindf = staindf.loc[staindf["Metadata_Stain"] != stain]
 
         comparer = PairwiseCompare(
-            _df=speckle_stain_treatedf,
+            _df=speckle_staindf,
             _comparator=mic_comparator,
             _antehoc_group_cols=["Metadata_Plate", "Metadata_Well", "Metadata_Condition"],
             _posthoc_group_cols=["Metadata_Stain"],
@@ -205,6 +199,23 @@ for stain in speckle_stains:
         micdfs.append(micdf)
 
 micdfs = pd.concat(micdfs, axis=0)
+
+
+# In[14]:
+
+
+agg_merge_cols = ["Metadata_Plate", "Metadata_Well"]
+
+micdfs = pd.merge(
+    left=micdfs,
+    right=staindf[agg_merge_cols + ["Metadata_Cell_Count", "Metadata_Condition"]],
+    how="inner",
+    left_on=[
+        "Metadata_Plate__antehoc_group0",
+        "Metadata_Well__antehoc_group0"
+    ],
+    right_on=agg_merge_cols,
+)
 
 
 # In[15]:
@@ -235,14 +246,17 @@ for stain in speckle_stains:
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
 
-    plt.title(f"Distributions of Maximal Information Coeficient (MIC)\nBetween DAPI and {stain} Features per Treated Well", fontsize=16)
+    plt.title(f"Distributions of Maximal Information Coeficient (MIC)\nBetween DAPI and {stain} Features per Well", fontsize=16)
 
-    plt.savefig(distribution_figures_path / f"mic_distributions_dapi_{stain.lower()}_treated_wells.png")
+    plt.xlim(0, 1)
+    plt.ylim(0.0, 80.0)
+
+    plt.savefig(distribution_figures_path / f"mic_distributions_dapi_{stain.lower()}_wells.png")
     plt.close()
 
 
 # In[17]:
 
 
-micdfs.to_parquet(mic_comparisons_path / "treated_well_sirna_mic_comparisons.parquet")
+micdfs.to_parquet(mic_comparisons_path / "well_sirna_mic_comparisons.parquet")
 

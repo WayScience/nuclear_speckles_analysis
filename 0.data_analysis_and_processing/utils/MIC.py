@@ -2,11 +2,12 @@ from collections import defaultdict
 from typing import Optional
 
 import pandas as pd
-from minepy import MINE
 from Comparator import Comparator
+from minepy import MINE
 
 
 class MIC(Comparator):
+    """Computes and stores group and Maximal Information Coefficient (MIC) data between paired groups"""
 
     def __init__(self, _comparison_name: str = "mic_e", _mine_params: Optional[dict[str, str]] = None):
         self._comparisons = defaultdict(list)
