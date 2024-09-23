@@ -30,6 +30,8 @@ class ModelTrainer:
         self.__backprop_loss_name = _backprop_loss_name
         self.__batch_size = _batch_size
         self.__epochs = _epochs
+
+        # Also known as an early stopping counter threshold
         self.__patience = _patience
 
         self.__device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -47,7 +49,7 @@ class ModelTrainer:
         self.train_loader = DataLoader(self.train_dataset, batch_size=_batch_size, shuffle=True)
         self.val_loader = DataLoader(self.val_dataset, batch_size=_batch_size, shuffle=False)
 
-    def __log_losses(self, _losses, _datasplit):
+    def __log_losses(self, _losses: defaultdict[str, float], _datasplit: str):
 
         for loss_name in self.__tracked_losses.keys():
             mlflow.log_metric(
@@ -56,7 +58,7 @@ class ModelTrainer:
                 step=self.__epoch
             )
 
-    def __update_evaluation_losses(self, _losses, _outputs, _targets):
+    def __update_evaluation_losses(self, _losses: defaultdict[str, float], _outputs: torch.Tensor, _targets: torch.Tensor):
         """Updates losses for any evaluation datasplit e.g. validation and testing."""
 
         return {loss_name: _losses[loss_name] + loss(_outputs, _targets).item() for loss_name, loss in self.__tracked_losses.items()}
@@ -117,7 +119,7 @@ class ModelTrainer:
         """Computes the loss for an evaluation datasplit, e.g. validation or testing."""
 
         self.__model.eval()
-        losses = defaultdict(int)
+        losses = defaultdict(float)
 
         with torch.no_grad():
             for inputs, targets in _data_loader:
