@@ -254,7 +254,7 @@ for stain in speckle_stains:
     plt.title(f"Distributions of Maximal Information Coeficient (MIC) Scores\nBetween DAPI and {stain} Features per Well", fontsize=16)
 
     plt.xlim(0, 1)
-    plt.ylim(0.0, 80.0)
+    plt.ylim(0.0, 90.0)
 
     plt.savefig(distribution_figures_path / f"mic_distributions_dapi_{stain.lower()}_wells.png")
     plt.close()
