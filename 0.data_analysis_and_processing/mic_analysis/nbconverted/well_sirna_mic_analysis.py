@@ -4,8 +4,8 @@
 # # Evaluate Well Stain Relationship Strength
 # This analysis compares Maximal Information Coefficient (MIC) scores between the same DAPI and nuclear speckle stain (A647 or GOLD) aggregated well features per well.
 # Distributions of these MIC scores are visualized, between zero and one, where one indicates a perfect relationship and zero indicates no relationship.
-# From this analysis we can underastand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
-# With these insights we may further improve or stain feature regression and stain translation models.
+# From this analysis we can understand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
+# With these insights we may further improve stain feature regression and stain translation models.
 # We save additional experimental details in a manifest for further evaluation.
 
 # In[1]:
@@ -201,24 +201,29 @@ for stain in speckle_stains:
 micdfs = pd.concat(micdfs, axis=0)
 
 
+# ## Remove Duplicate Antehoc Columns
+
 # In[14]:
+
+
+micdfs = micdfs.loc[:, ~micdfs.columns.str.contains("__antehoc_group1")]
+micdfs.columns = micdfs.columns.str.replace("__antehoc_group0", "", regex=False)
+
+
+# In[15]:
 
 
 agg_merge_cols = ["Metadata_Plate", "Metadata_Well"]
 
 micdfs = pd.merge(
     left=micdfs,
-    right=staindf[agg_merge_cols + ["Metadata_Cell_Count", "Metadata_Condition"]],
+    right=staindf[agg_merge_cols + ["Metadata_Cell_Count"]],
     how="inner",
-    left_on=[
-        "Metadata_Plate__antehoc_group0",
-        "Metadata_Well__antehoc_group0"
-    ],
-    right_on=agg_merge_cols,
+    on=agg_merge_cols
 )
 
 
-# In[15]:
+# In[16]:
 
 
 print(micdfs)
@@ -226,7 +231,7 @@ print(micdfs)
 
 # # Save Results
 
-# In[16]:
+# In[17]:
 
 
 for stain in speckle_stains:
@@ -240,22 +245,22 @@ for stain in speckle_stains:
 
     plt.gcf().set_size_inches(18, 10)
 
-    plt.xlabel("MIC", fontsize=13)
-    plt.ylabel("Density", fontsize=13)
+    plt.xlabel("MIC Score", fontsize=13)
+    plt.ylabel("Number of Wells", fontsize=13)
 
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
 
-    plt.title(f"Distributions of Maximal Information Coeficient (MIC)\nBetween DAPI and {stain} Features per Well", fontsize=16)
+    plt.title(f"Distributions of Maximal Information Coeficient (MIC) Scores\nBetween DAPI and {stain} Features per Well", fontsize=16)
 
     plt.xlim(0, 1)
-    plt.ylim(0.0, 80.0)
+    plt.ylim(0.0, 90.0)
 
     plt.savefig(distribution_figures_path / f"mic_distributions_dapi_{stain.lower()}_wells.png")
     plt.close()
 
 
-# In[17]:
+# In[18]:
 
 
 micdfs.to_parquet(mic_comparisons_path / "well_sirna_mic_comparisons.parquet")
