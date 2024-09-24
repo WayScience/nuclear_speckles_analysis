@@ -194,11 +194,11 @@ mlflow.log_params(optim_params)
 
 # These keys will be in the names of the logged losses
 tracked_losses = {
-    "mse loss": nn.MSELoss(),
-    "mae loss": nn.L1Loss()
+    "mse_loss": nn.MSELoss(),
+    "mae_loss": nn.L1Loss()
 }
 
-backprop_loss_name = "mae loss"
+backprop_loss_name = "mae_loss"
 
 mlflow.log_param("Training Loss", backprop_loss_name)
 
@@ -207,10 +207,13 @@ mlflow.log_param("Training Loss", backprop_loss_name)
 
 
 trainer_params = {
-    "_batch_size": 32,
-    "_epochs": 2_000,
-    "_patience": 15
+    "batch_size": 32,
+    "epochs": 2_000,
+    "patience": 15
 }
+
+mlflow.log_params(trainer_params)
+trainer_params = {f"_{param_name}": param_value for param_name, param_value in trainer_params.items()}
 
 
 # In[15]:
