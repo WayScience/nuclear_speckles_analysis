@@ -4,8 +4,8 @@
 # # Evaluate Well Stain Relationship Strength
 # This analysis compares Maximal Information Coefficient (MIC) scores between the same DAPI and nuclear speckle stain (A647 or GOLD) aggregated well features per well.
 # Distributions of these MIC scores are visualized, between zero and one, where one indicates a perfect relationship and zero indicates no relationship.
-# From this analysis we can underastand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
-# With these insights we may further improve or stain feature regression and stain translation models.
+# From this analysis we can understand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
+# With these insights we may further improve stain feature regression and stain translation models.
 # We save additional experimental details in a manifest for further evaluation.
 
 # In[1]:
@@ -200,6 +200,8 @@ for stain in speckle_stains:
 
 micdfs = pd.concat(micdfs, axis=0)
 
+
+# ## Remove Duplicate Antehoc Columns
 
 # In[14]:
 
