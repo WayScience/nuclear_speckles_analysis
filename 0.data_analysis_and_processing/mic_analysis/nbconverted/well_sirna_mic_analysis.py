@@ -204,21 +204,24 @@ micdfs = pd.concat(micdfs, axis=0)
 # In[14]:
 
 
+micdfs = micdfs.loc[:, ~micdfs.columns.str.contains("__antehoc_group1")]
+micdfs.columns = micdfs.columns.str.replace("__antehoc_group0", "", regex=False)
+
+
+# In[15]:
+
+
 agg_merge_cols = ["Metadata_Plate", "Metadata_Well"]
 
 micdfs = pd.merge(
     left=micdfs,
-    right=staindf[agg_merge_cols + ["Metadata_Cell_Count", "Metadata_Condition"]],
+    right=staindf[agg_merge_cols + ["Metadata_Cell_Count"]],
     how="inner",
-    left_on=[
-        "Metadata_Plate__antehoc_group0",
-        "Metadata_Well__antehoc_group0"
-    ],
-    right_on=agg_merge_cols,
+    on=agg_merge_cols
 )
 
 
-# In[15]:
+# In[16]:
 
 
 print(micdfs)
@@ -226,7 +229,7 @@ print(micdfs)
 
 # # Save Results
 
-# In[16]:
+# In[17]:
 
 
 for stain in speckle_stains:
@@ -240,13 +243,13 @@ for stain in speckle_stains:
 
     plt.gcf().set_size_inches(18, 10)
 
-    plt.xlabel("MIC", fontsize=13)
-    plt.ylabel("Density", fontsize=13)
+    plt.xlabel("MIC Score", fontsize=13)
+    plt.ylabel("Number of Wells", fontsize=13)
 
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
 
-    plt.title(f"Distributions of Maximal Information Coeficient (MIC)\nBetween DAPI and {stain} Features per Well", fontsize=16)
+    plt.title(f"Distributions of Maximal Information Coeficient (MIC) Scores\nBetween DAPI and {stain} Features per Well", fontsize=16)
 
     plt.xlim(0, 1)
     plt.ylim(0.0, 80.0)
@@ -255,7 +258,7 @@ for stain in speckle_stains:
     plt.close()
 
 
-# In[17]:
+# In[18]:
 
 
 micdfs.to_parquet(mic_comparisons_path / "well_sirna_mic_comparisons.parquet")
