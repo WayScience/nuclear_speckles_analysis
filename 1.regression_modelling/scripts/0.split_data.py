@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # ## Split data into training, testing, and holdout sets
-# 
+#
 # In this notebook, we use the normalized profiles to train regression models to predict each individual feature from each nuclear speckle stain (A647 and GOLD).
 # We first have to remove any columns with NaN values and remove single-cells that are not included in the [filtered single cells file](../0.data_analysis_and_processing/filtered_single_cells/filtered_single_cell_profiles.parquet).
 # The filtering was performed in the previous module where any single-cell crop had a height and width outside of a designated range was removed.
@@ -16,9 +16,8 @@
 import pathlib
 
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from pycytominer import feature_select
-
+from sklearn.model_selection import train_test_split
 
 # ## Load in normalized profiles and concat into one dataframe
 
