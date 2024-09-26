@@ -105,7 +105,6 @@ X_shuffled = X.copy()
 for col in X_shuffled.columns:
     np.random.shuffle(X_shuffled[col].values)  # Shuffle values in place, independently
 
-
 # Organize the column names into a dictionary
 features_dict = {
     "nucleus_features": nucleus_features,
@@ -114,7 +113,7 @@ features_dict = {
 }
 
 # Define the path to save the YAML file
-yaml_file_path = pathlib.Path("./features_dict.yml")
+yaml_file_path = pathlib.Path("./features_dict.yml").resolve()
 
 # Save the dictionary as a YAML file
 with open(yaml_file_path, "w") as yaml_file:

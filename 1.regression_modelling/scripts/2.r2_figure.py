@@ -11,13 +11,11 @@
 import pathlib
 
 import joblib
-import yaml
+import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
-
+import yaml
 from sklearn.metrics import r2_score
-
 
 # ## Set paths
 
@@ -25,7 +23,7 @@ from sklearn.metrics import r2_score
 
 
 # Output for figures
-figures_dir = pathlib.Path("./figures")
+figures_dir = pathlib.Path("./figures").resolve()
 figures_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -35,13 +33,13 @@ figures_dir.mkdir(parents=True, exist_ok=True)
 
 
 # Define the path to the YAML file with all the features per stain
-yaml_file_path = pathlib.Path("./features_dict.yml")
+yaml_file_path = pathlib.Path("./features_dict.yml").resolve()
 
 # Load the column names dictionary from the YAML file
 with open(yaml_file_path, 'r') as yaml_file:
     features_dict = yaml.safe_load(yaml_file)
 
-# Access the lists of features
+# Access the lists of normalized features per stain
 nucleus_features = features_dict['nucleus_features']
 a647_features = features_dict['a647_features']
 gold_features = features_dict['gold_features']
@@ -92,7 +90,7 @@ results = []
 for model_file in model_files:
     # Get the parent folder (either 'final' or 'shuffled_baseline')
     folder_name = model_file.parent.name
-    
+
     # Set the model type based on the folder name
     if folder_name == 'shuffled_baseline':
         model_name = model_file.stem.replace('_shuffled_tuned_model', '')
@@ -157,7 +155,14 @@ results_df.head()
 
 
 # Function to create the plot for each stain
-def plot_r2(results_df, palette_dict, datasplit):
+def boxplot_r2(results_df: pd.DataFrame, palette_dict: dict, datasplit: str) -> None:
+    """Boxplot of R2 scores across stains
+
+    Args:
+        results_df (pd.DataFrame): dataframe with R2 results that can be specific to a datasplit
+        palette_dict (dict): dictionary with the colors for each measurement
+        datasplit (str): string of what the datasplit being plotted is for the title
+    """
     # Set the figure size
     plt.figure(figsize=(14, 8))
 
@@ -240,7 +245,7 @@ palette_dict = dict(zip(unique_measurements, palette))
 # In[10]:
 
 
-plot_r2(filtered_results_df, palette_dict, "Testing")
+boxplot_r2(filtered_results_df, palette_dict, "Testing")
 
 
 # ## Split features to get an R2 score per stain and plot R2 results
@@ -250,27 +255,38 @@ plot_r2(filtered_results_df, palette_dict, "Testing")
 # In[11]:
 
 
-def process_subset(df, split_type, model_type):
+def split_r2_score_features(df: pd.DataFrame, split_type: str, model_type: str) -> pd.DataFrame:
+    """Remove stain from features to find the combinations of the same feature to have a column
+    per stain R2 score and one row per feature.
+
+    Args:
+        df (pd.DataFrame): dataframe with R2 score results for each feature (with stain)
+        split_type (str): string of the data split to include as column in output (e.g., Testing, Training, or Holdout)
+        model_type (str): string of the model type to include as column in output (e.g., Final or Shuffled)
+
+    Returns:
+        pd.DataFrame: final dataframe with each row as a common feature with an R2 score per stain
+    """
     # Create a copy of df_subset to avoid modifying the original slice
     df_subset = df.copy()
-    
+
     # Step 1: Remove rows where 'Feature' contains both 'A647' and 'GOLD'
     df_subset = df_subset[~(df_subset['Feature'].str.contains('A647') & df_subset['Feature'].str.contains('GOLD'))]
-    
+
     # Step 2: Add 'Feature_clean' without modifying 'Feature'
     df_subset['Feature_clean'] = df_subset['Feature'].str.replace('A647', '').str.replace('GOLD', '').str.strip('_')
-    
+
     # Step 3: Find duplicates by 'Feature_clean' and keep R2 score for both 'A647' and 'GOLD'
     a647_scores = df_subset[df_subset['Stain'] == 'A647'][['Feature', 'Feature_clean', 'R2 score']].rename(columns={'Feature': 'Feature_A647', 'R2 score': 'A647 R2 score'})
     gold_scores = df_subset[df_subset['Stain'] == 'GOLD'][['Feature', 'Feature_clean', 'R2 score']].rename(columns={'Feature': 'Feature_GOLD', 'R2 score': 'GOLD R2 score'})
-    
+
     # Step 4: Merge the dataframes based on 'Feature_clean'
     merged_results = pd.merge(a647_scores, gold_scores, on='Feature_clean', how='outer')
-    
+
     # Add columns to indicate the data split and model type
     merged_results['Data split'] = split_type
     merged_results['Model type'] = model_type
-    
+
     return merged_results
 
 
@@ -295,16 +311,16 @@ df_holdout_shuffled = results_df[(results_df['Data split'] == 'Holdout') & (resu
 
 
 # Process each subset with designation
-training_final_results = process_subset(df_training_final, 'Training', 'final')
-testing_final_results = process_subset(df_testing_final, 'Testing', 'final')
-holdout_final_results = process_subset(df_holdout_final, 'Holdout', 'final')
+training_final_results = split_r2_score_features(df_training_final, 'Training', 'final')
+testing_final_results = split_r2_score_features(df_testing_final, 'Testing', 'final')
+holdout_final_results = split_r2_score_features(df_holdout_final, 'Holdout', 'final')
 
-training_shuffled_results = process_subset(df_training_shuffled, 'Training', 'shuffled')
-testing_shuffled_results = process_subset(df_testing_shuffled, 'Testing', 'shuffled')
-holdout_shuffled_results = process_subset(df_holdout_shuffled, 'Holdout', 'shuffled')
+training_shuffled_results = split_r2_score_features(df_training_shuffled, 'Training', 'shuffled')
+testing_shuffled_results = split_r2_score_features(df_testing_shuffled, 'Testing', 'shuffled')
+holdout_shuffled_results = split_r2_score_features(df_holdout_shuffled, 'Holdout', 'shuffled')
 
 # Concatenate the results
-final_results_df = pd.concat([training_final_results, testing_final_results, holdout_final_results, 
+final_results_df = pd.concat([training_final_results, testing_final_results, holdout_final_results,
                               training_shuffled_results, testing_shuffled_results, holdout_shuffled_results])
 
 # Extract 'Measurement' from 'Feature_clean' after merging
@@ -331,8 +347,8 @@ fig, ax = plt.subplots(figsize=(8.5, 6))
 
 # Plot with different shapes based on 'Data split'
 sns.scatterplot(data=filtered_final_results_df,
-                x='GOLD R2 score', y='A647 R2 score', 
-                hue='Measurement', style='Data split', 
+                x='GOLD R2 score', y='A647 R2 score',
+                hue='Measurement', style='Data split',
                 palette=palette_dict, ax=ax)
 
 # Add y = x line as reference
@@ -376,8 +392,8 @@ markers = {'Testing': 'X', 'Holdout': 's'}
 
 # Plot with different shapes based on 'Data split'
 sns.scatterplot(data=filtered_final_results_df,
-                x='GOLD R2 score', y='A647 R2 score', 
-                hue='Measurement', style='Data split', 
+                x='GOLD R2 score', y='A647 R2 score',
+                hue='Measurement', style='Data split',
                 markers=markers, palette=palette_dict, ax=ax)
 
 # Add y = x line as reference
@@ -404,7 +420,7 @@ plt.show()
 # ## Holdout data boxplot comparing between stains
 
 # ### Filter only holdout data from the final model
-# 
+#
 # Note: We know the shuffled models are under performing in the previous plot so we don't need to include it here.
 
 # In[16]:
@@ -438,7 +454,7 @@ plt.figure(figsize=(14, 8))
 sns.boxplot(
     data=holdout_df,
     x='R2 score',
-    y='Stain',  
+    y='Stain',
     dodge=True,  # Adjust box plots for multiple hues
     fliersize=0,  # Hide the default outliers as we add scatter later
     width=0.5  # Adjust the width to increase separation
@@ -480,11 +496,11 @@ plt.show()
 
 
 # ## Generate boxplot figure comparing the top 2 model feature distributions across stains using the training data
-# 
+#
 # Note: We do not save these figures as the results from them do not tell a clear story to use elsewhere.
 
 # ### Identify top two features per stain
-# 
+#
 # These will be the same two RadialDistribution features (FracatD and Zernike 2,2).
 
 # In[18]:
@@ -499,10 +515,10 @@ for stain in ['A647', 'GOLD']:
     stain_features_df = final_results_df[
         ~final_results_df[f'{stain} R2 score'].isna()
     ].sort_values(by=f'{stain} R2 score', ascending=False)
-    
+
     # Get the top 2 features for the each stain
     top_stain_features = stain_features_df.head(4)[f'Feature_{stain}'].tolist()
-    
+
     # Add to the top features list
     top_features_list.extend(top_stain_features)
 
@@ -573,7 +589,7 @@ plt.figure(figsize=(12, 8))
 sns.boxplot(
     data=filtered_training_df,
     x='Metadata_Condition',  # Metadata_condition on x-axis
-    y='Nuclei_RadialDistribution_FracAtD_A647_4of4',  
+    y='Nuclei_RadialDistribution_FracAtD_A647_4of4',
     palette='viridis'  # You can choose a different palette if needed
 )
 
@@ -602,7 +618,7 @@ plt.figure(figsize=(12, 8))
 sns.boxplot(
     data=filtered_training_df,
     x='Metadata_Condition',  # Metadata_condition on x-axis
-    y='Nuclei_RadialDistribution_ZernikePhase_GOLD_2_2',  
+    y='Nuclei_RadialDistribution_ZernikePhase_GOLD_2_2',
     palette='viridis'  # You can choose a different palette if needed
 )
 
@@ -631,7 +647,7 @@ plt.figure(figsize=(12, 8))
 sns.boxplot(
     data=filtered_training_df,
     x='Metadata_Condition',  # Metadata_condition on x-axis
-    y='Nuclei_RadialDistribution_ZernikePhase_A647_2_2',  
+    y='Nuclei_RadialDistribution_ZernikePhase_A647_2_2',
     palette='viridis'  # You can choose a different palette if needed
 )
 
@@ -648,10 +664,4 @@ plt.tight_layout()
 
 # Show plot
 plt.show()
-
-
-# In[ ]:
-
-
-
 

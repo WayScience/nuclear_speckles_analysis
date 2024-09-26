@@ -15,7 +15,6 @@ from typing import List
 import cv2
 import pandas as pd
 
-
 # ## Set functions for processing and generating single-cell crops
 
 # In[2]:
@@ -58,7 +57,7 @@ def generate_sc_crops(
     output_img_dir: pathlib.Path,
     crop_size: int,
 ) -> None:
-    """Using a dictionary with single-cell metadata info per image set, single-cell crops per channel are generated 
+    """Using a dictionary with single-cell metadata info per image set, single-cell crops per channel are generated
     and saved as PNGs in an image set folder.
 
     Args:
@@ -107,7 +106,9 @@ def generate_sc_crops(
                 key_dir.mkdir(exist_ok=True, parents=True)
 
                 # Save the cropped image with single_cell and channel information
-                output_filename = str(pathlib.Path(f"{key_dir}/{key}_CH{i}_cropped.png"))
+                output_filename = str(
+                    pathlib.Path(f"{key_dir}/{key}_CH{i}_cropped.png")
+                )
                 cv2.imwrite(output_filename, cropped_channel)
 
 
@@ -116,7 +117,7 @@ def generate_sc_crops(
 # In[4]:
 
 
-# Images directory for 
+# Images directory for
 images_dir = pathlib.Path(
     "/media/18tbdrive/Github_Repositories/nuclear_speckle_image_profiling/2.illumination_correction/IC_corrected_images"
 ).resolve(strict=True)
@@ -140,10 +141,11 @@ list_of_names = []
 # In[5]:
 
 
-model_dir = pathlib.Path('./models')  # Path to the folder with models
+# Path to the folder with models
+model_dir = pathlib.Path("./models").resolve(strict=True)
 
-# paths to the data splits
-training_data_path = pathlib.Path('./data/training_data.parquet')
+# paths to the training data split
+training_data_path = pathlib.Path("./data/training_data.parquet").resolve(strict=True)
 
 # Load your datasets
 training_df = pd.read_parquet(training_data_path)
@@ -182,7 +184,9 @@ top_A647
 
 
 # Get data frame with the bottom single-cells
-bottom_A647 = training_df.nsmallest(5, "Nuclei_RadialDistribution_ZernikePhase_A647_2_2")[
+bottom_A647 = training_df.nsmallest(
+    5, "Nuclei_RadialDistribution_ZernikePhase_A647_2_2"
+)[
     [
         "Nuclei_RadialDistribution_ZernikePhase_A647_2_2",
         "Metadata_Well",
@@ -230,7 +234,9 @@ top_GOLD
 
 
 # Get data frame with the bottom single-cells
-bottom_GOLD = training_df.nsmallest(5, "Nuclei_RadialDistribution_ZernikePhase_GOLD_2_2")[
+bottom_GOLD = training_df.nsmallest(
+    5, "Nuclei_RadialDistribution_ZernikePhase_GOLD_2_2"
+)[
     [
         "Nuclei_RadialDistribution_ZernikePhase_GOLD_2_2",
         "Metadata_Well",
@@ -266,5 +272,10 @@ pprint(list(sc_dict.items())[:2], indent=4)
 # In[11]:
 
 
-generate_sc_crops(sc_dict=sc_dict, images_dir=images_dir, output_img_dir=output_img_dir, crop_size=crop_size)
+generate_sc_crops(
+    sc_dict=sc_dict,
+    images_dir=images_dir,
+    output_img_dir=output_img_dir,
+    crop_size=crop_size,
+)
 
