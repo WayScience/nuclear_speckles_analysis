@@ -11,3 +11,5 @@ jupyter nbconvert --to script --output-dir=scripts/ *.ipynb
 # run python script to spit, train, and evaluate the model (ran in sequential order)
 python scripts/0.split_data.py
 python scripts/1.train_models.py
+python scripts/2.r2_figure.py
+python scripts/3.find_sc_crops.py

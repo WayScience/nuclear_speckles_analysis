@@ -3,3 +3,6 @@ models*
 
 # Ignore data splits due to large size
 data*
+
+# Ignore single-cell crops
+sc_crops*

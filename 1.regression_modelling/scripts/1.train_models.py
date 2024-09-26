@@ -2,9 +2,9 @@
 # coding: utf-8
 
 # # Train ElasticNet model to predict each A647 and GOLD feature using the nuclear features
-# 
+#
 # In this notebook, we split the features into each group for nuclear speckle or nucleus and then train a regression model per nuclear speckle feature using the nuclear features to predict it.
-# 
+#
 # We are looking to find the best nuclear speckle feature that can be predicted using nucleus features.
 
 # ## Import libraries
@@ -13,13 +13,14 @@
 
 
 import os
+import pathlib
 import sys
 import warnings
 
 import joblib
 import numpy as np
 import pandas as pd
-import pathlib
+import yaml
 from sklearn.linear_model import ElasticNet
 from sklearn.model_selection import KFold, RandomizedSearchCV
 from tqdm import tqdm
@@ -103,6 +104,22 @@ X = training_df[nucleus_features]
 X_shuffled = X.copy()
 for col in X_shuffled.columns:
     np.random.shuffle(X_shuffled[col].values)  # Shuffle values in place, independently
+
+# Organize the column names into a dictionary
+features_dict = {
+    "nucleus_features": nucleus_features,
+    "a647_features": a647_features,
+    "gold_features": gold_features,
+}
+
+# Define the path to save the YAML file
+yaml_file_path = pathlib.Path("./features_dict.yml").resolve()
+
+# Save the dictionary as a YAML file
+with open(yaml_file_path, "w") as yaml_file:
+    yaml.dump(features_dict, yaml_file, default_flow_style=False)
+
+print(f"Column names saved to {yaml_file_path}")
 
 # Print the lists to verify
 print(f"Nucleus Features: {len(nucleus_features)}")
