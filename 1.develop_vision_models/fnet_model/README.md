@@ -4,5 +4,5 @@ This task is similar to our task, in which predict cropped nuclear GOLD images f
 Therefore, we decided to use the 2d fnet model's architecture for our task without pre-training.
 
 To mimic approach of Ounkomol et. al. we train the 2d fnet model using the same hyperparameters.
-Similar to Ounkomol et. al., we standardized pixel intensities in each image using the standard scaler transform.
-However to ensure the dimensionality was conserved we cropped one pixel from each side of the cropped nuclei images.
+To improve performance in generating stains from the fnet model we min-max normalize pixel intensities in each image.
+However to ensure the dimensionality is conserved we crop one pixel from each side of the cropped nuclei images.
