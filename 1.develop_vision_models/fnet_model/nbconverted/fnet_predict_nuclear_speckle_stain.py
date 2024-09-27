@@ -3,7 +3,7 @@
 
 # # Predict GOLD Stain from DAPI (Fnet)
 # The 2d fnet architecture (https://doi.org/10.1038/s41592-018-0111-2) is trained to predict the GOLD stain from cropped DAPI Nuclei Images.
-# This model was trained on a similar task, therefore, we are interested in model's performance when trained on our task.
+# This model was trained on a similar task, therefore, we are interested in the model's performance when trained on our task.
 
 # In[1]:
 
@@ -13,6 +13,7 @@ import random
 import sys
 from collections import defaultdict
 from typing import Tuple
+import copy
 
 import albumentations as A
 import matplotlib.pyplot as plt
@@ -58,7 +59,7 @@ from ImageDataset import ImageDataset
 from models.fnet_nn_2d import Net
 from ModelTrainer import ModelTrainer
 from transforms.CropNPixels import CropNPixels
-from transforms.StandardScaler import StandardScaler
+from transforms.MinMaxNormalize import MinMaxNormalize
 
 
 # ## Set random seeds
@@ -78,10 +79,10 @@ mlflow.log_param("random_seed", 0)
 
 
 # Nuclei crops path of treated nuclei in the Dapi channel with all original pixel values
-treated_dapi_crops = (root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops").resolve(strict=True)
+treated_dapi_crops = (root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops_same_background").resolve(strict=True)
 
 # Nuclei crops path of nuclei in the Gold channel with all original pixel values
-gold_crops = (root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei").resolve(strict=True)
+gold_crops = (root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei_same_background").resolve(strict=True)
 
 # Paths to original nuclear speckle data
 data_dir = (root_dir / "nuclear_speckles_data").resolve(strict=True)
@@ -111,7 +112,7 @@ model_path.mkdir(parents=True, exist_ok=True)
 # In[7]:
 
 
-description = "Here we leverage the 2d fnet architecture in https://doi.org/10.1038/s41592-018-0111-2 to predict the GOLD stain from cropped DAPI Nuclei Images. We retain all pixel values in the cropped images"
+description = "Here we leverage the 2d fnet architecture in https://doi.org/10.1038/s41592-018-0111-2 to predict the GOLD stain from cropped DAPI Nuclei Images. We retain all pixel values in the cropped images, and normalize these pixels using min-max normalization. We also crop one additional pixel from each side of each image to satisfy a dimensionality requirement for the network."
 mlflow.set_tag("mlflow.note.content", description)
 
 
@@ -121,12 +122,11 @@ mlflow.set_tag("mlflow.note.content", description)
 
 
 def format_img(_tensor_img: torch.Tensor) -> np.ndarray:
-    """Reshapes an image and rescales pixel values from the StandardScaler transform."""
+    """Reshapes an image and rescales pixel values from the MinMaxNormalize transform."""
 
-    mean = trainer.val_dataset.dataset.input_transform[0].mean
-    std = trainer.val_dataset.dataset.input_transform[0].std
+    norm_factor = trainer.val_dataset.dataset.input_transform[0].normalization_factor
 
-    return (torch.squeeze(_tensor_img) * std + mean).to(torch.uint16).cpu().numpy()
+    return (torch.squeeze(_tensor_img) * norm_factor).to(torch.uint16).cpu().numpy()
 
 
 # In[9]:
@@ -150,16 +150,18 @@ def evaluate_and_format_imgs(_input: torch.Tensor, _target: torch.Tensor) -> Tup
 # In[10]:
 
 
-transforms = A.Compose([
-    StandardScaler(_always_apply=True),
+input_transforms = A.Compose([
+    MinMaxNormalize(_normalization_factor=(2 ** 16) - 1, _always_apply=True),
     CropNPixels(_pixel_count=1, _always_apply=True)
 ])
+
+target_transforms = copy.deepcopy(input_transforms)
 
 img_dataset = ImageDataset(
     _input_dir=treated_dapi_crops,
     _target_dir=gold_crops,
-    _input_transform=transforms,
-    _target_transform=transforms
+    _input_transform=input_transforms,
+    _target_transform=target_transforms
 )
 
 
@@ -168,8 +170,9 @@ img_dataset = ImageDataset(
 
 model = Net()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 model.to(device)
+
+mlflow.set_tag("model_architecture", "fnet")
 
 
 # In[12]:
@@ -242,10 +245,8 @@ trainer.train()
 
 
 example_images_per_sirna = 10
-max_pixel_val = 2**16 - 1
 
 sirna_img_counts = {sirna: 0 for sirna in scdfs.loc[scdfs["Metadata_Condition"] != "untreated"]["Metadata_Condition"].unique()}
-i = 0
 
 for input, target in iter(trainer.val_dataset):
 
@@ -260,6 +261,9 @@ for input, target in iter(trainer.val_dataset):
 
     input, target, output = evaluate_and_format_imgs(input, target)
 
+    max_pixel_val = max(np.max(input), np.max(target), np.max(output))
+    min_pixel_val = min(np.min(input), np.min(target), np.min(output))
+
     titles = ['DAPI Image', 'Predicted GOLD Image', 'Target GOLD Image']
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -268,15 +272,15 @@ for input, target in iter(trainer.val_dataset):
 
     plt.subplots_adjust(wspace=0.3, hspace=0)  # Adjust `wspace` if titles overlap
 
-    axes[0].imshow(input, cmap="grey", vmin=0, vmax=max_pixel_val)
+    axes[0].imshow(input, cmap="grey", vmin=min_pixel_val, vmax=max_pixel_val)
     axes[0].axis('off')
     axes[0].set_title(titles[0], fontsize=14)
 
-    axes[1].imshow(output, cmap="grey", vmin=0, vmax=max_pixel_val)
+    axes[1].imshow(output, cmap="grey", vmin=min_pixel_val, vmax=max_pixel_val)
     axes[1].axis('off')
     axes[1].set_title(titles[1], fontsize=14)
 
-    axes[2].imshow(target, cmap="grey", vmin=0, vmax=max_pixel_val)
+    axes[2].imshow(target, cmap="grey", vmin=min_pixel_val, vmax=max_pixel_val)
     axes[2].axis('off')
     axes[2].set_title(titles[2], fontsize=14)
 
