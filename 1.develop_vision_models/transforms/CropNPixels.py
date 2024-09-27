@@ -2,6 +2,8 @@ from albumentations import ImageOnlyTransform
 import numpy as np
 
 class CropNPixels(ImageOnlyTransform):
+    """Crop the specified number of pixels from each side of an image"""
+
     def __init__(self, _pixel_count=1, _always_apply=False, _p=0.5):
         super(CropNPixels, self).__init__(_always_apply, _p)
         self.pixel_count = _pixel_count
