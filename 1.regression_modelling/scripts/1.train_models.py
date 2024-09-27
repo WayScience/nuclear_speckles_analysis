@@ -174,12 +174,12 @@ random_search_params = {
 warnings.filterwarnings("ignore")
 
 # List of feature sets to iterate per stain
-feature_sets = [("A647", a647_features), ("GOLD", gold_features)]
+stain_feature_sets = [("A647", a647_features), ("GOLD", gold_features)]
 
-# Loop through each feature set
-for feature_name, feature_list in tqdm(feature_sets, desc="Processing all features", leave=False):
+# Loop through each staim feature set
+for stain_name, feature_list in tqdm(stain_feature_sets, desc="Processing all features", leave=False):
     # Dynamically print progress
-    tqdm.write(f"Processing {feature_name} features...")
+    tqdm.write(f"Processing {stain_name} features...")
 
     # Combine features into a matrix for the current feature set
     y_matrix = training_df[feature_list]
@@ -192,14 +192,14 @@ for feature_name, feature_list in tqdm(feature_sets, desc="Processing all featur
     random_search.fit(X, y_matrix)  # Fit using all features as y
 
     # Save the tuned model for the current feature set
-    model_filename = all_features_dir / f"combined_{feature_name}_tuned_model.joblib"
+    model_filename = all_features_dir / f"combined_{stain_name}_tuned_model.joblib"
     joblib.dump(random_search.best_estimator_, model_filename)
 
     random_search_shuffled = RandomizedSearchCV(logreg, **random_search_params)
     random_search_shuffled.fit(X_shuffled, y_matrix)  # Fit on shuffled data
 
     # Save the shuffled tuned model for the current feature set
-    shuffled_model_filename = all_features_dir / f"combined_{feature_name}_shuffled_tuned_model.joblib"
+    shuffled_model_filename = all_features_dir / f"combined_{stain_name}_shuffled_tuned_model.joblib"
     joblib.dump(random_search_shuffled.best_estimator_, shuffled_model_filename)
 
 print("All models for both combined A647 and GOLD features have been trained and tuned!")
