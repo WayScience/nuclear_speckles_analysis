@@ -231,10 +231,10 @@ print(micdfs)
 
 stains = {"DAPI", "GOLD", "A647"}
 
-for stain in stains:
+for left_out_stain in stains:
 
-    comparison_stains = list(stains - {stain})
-    stain_micdfs = micdfs.loc[~(micdfs["Metadata_Stain__posthoc_group0"].str.contains(stain, regex=True) | micdfs["Metadata_Stain__posthoc_group1"].str.contains(stain, regex=True))]
+    comparison_stains = list(stains - {left_out_stain})
+    stain_micdfs = micdfs.loc[~(micdfs["Metadata_Stain__posthoc_group0"].str.contains(left_out_stain, regex=True) | micdfs["Metadata_Stain__posthoc_group1"].str.contains(left_out_stain, regex=True))]
 
     sns.histplot(data=stain_micdfs, x="mic_e", hue="Metadata_Comparison_Type",
     palette={"shuffled_mic": 'blue', "mic": 'red'}, bins=10, kde=False)
