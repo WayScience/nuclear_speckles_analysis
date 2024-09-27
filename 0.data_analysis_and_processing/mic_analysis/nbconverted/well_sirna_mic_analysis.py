@@ -2,9 +2,9 @@
 # coding: utf-8
 
 # # Evaluate Well Stain Relationship Strength
-# This analysis compares Maximal Information Coefficient (MIC) scores between the same DAPI and nuclear speckle stain (A647 or GOLD) aggregated well features per well.
+# This analysis compares Maximal Information Coefficient (MIC) scores between DAPI and nuclear speckle stain (A647 and GOLD) aggregated well features per well.
 # Distributions of these MIC scores are visualized, between zero and one, where one indicates a perfect relationship and zero indicates no relationship.
-# From this analysis we can understand the relationships between the DAPI and nuclear speckle stains per cell population (Treatment, Well Position, Plate, etc...)
+# From this analysis we can understand the relationships between these stains per cell population (Treatment, Well Position, Plate, etc...)
 # With these insights we may further improve stain feature regression and stain translation models.
 # We save additional experimental details in a manifest for further evaluation.
 
@@ -12,7 +12,6 @@
 
 
 import pathlib
-import re
 import sys
 
 import matplotlib.pyplot as plt
@@ -170,33 +169,29 @@ print(staindf)
 
 
 micdfs = []
-speckle_stains = {"GOLD", "A647"}
 
-for stain in speckle_stains:
-    for feature_order in ("mic", "shuffled_mic"):
+for feature_order in ("mic", "shuffled_mic"):
 
-        if feature_order == "mic":
-            mic_comparator = MIC()
+    if feature_order == "mic":
+        mic_comparator = MIC()
 
-        else:
-            # Shuffles the samples/features depending on your perspective
-            mic_comparator = ShuffledMIC()
+    else:
+        # Shuffles the samples/features depending on your perspective
+        mic_comparator = ShuffledMIC()
 
-        speckle_staindf = staindf.loc[staindf["Metadata_Stain"] != stain]
+    comparer = PairwiseCompare(
+        _df=staindf.copy(),
+        _comparator=mic_comparator,
+        _antehoc_group_cols=["Metadata_Plate", "Metadata_Well", "Metadata_Condition"],
+        _posthoc_group_cols=["Metadata_Stain"],
+        _feat_cols=feat_cols,
+    )
 
-        comparer = PairwiseCompare(
-            _df=speckle_staindf,
-            _comparator=mic_comparator,
-            _antehoc_group_cols=["Metadata_Plate", "Metadata_Well", "Metadata_Condition"],
-            _posthoc_group_cols=["Metadata_Stain"],
-            _feat_cols=feat_cols,
-        )
+    comparer.intra_comparisons()
 
-        comparer.intra_comparisons()
-
-        micdf = pd.DataFrame(mic_comparator.comparisons)
-        micdf = micdf.assign(Metadata_Comparison_Type=feature_order)
-        micdfs.append(micdf)
+    micdf = pd.DataFrame(mic_comparator.comparisons)
+    micdf = micdf.assign(Metadata_Comparison_Type=feature_order)
+    micdfs.append(micdf)
 
 micdfs = pd.concat(micdfs, axis=0)
 
@@ -234,11 +229,12 @@ print(micdfs)
 # In[17]:
 
 
-for stain in speckle_stains:
+stains = {"DAPI", "GOLD", "A647"}
 
-    pattern = f"DAPI|{re.escape(stain)}"
-    stain_micdfs = micdfs.loc[micdfs["Metadata_Stain__posthoc_group0"].str.contains(pattern, regex=True) & micdfs["Metadata_Stain__posthoc_group1"].str.contains(pattern, regex=True)]
-    print(stain_micdfs)
+for left_out_stain in stains:
+
+    comparison_stains = list(stains - {left_out_stain})
+    stain_micdfs = micdfs.loc[~(micdfs["Metadata_Stain__posthoc_group0"].str.contains(left_out_stain, regex=True) | micdfs["Metadata_Stain__posthoc_group1"].str.contains(left_out_stain, regex=True))]
 
     sns.histplot(data=stain_micdfs, x="mic_e", hue="Metadata_Comparison_Type",
     palette={"shuffled_mic": 'blue', "mic": 'red'}, bins=10, kde=False)
@@ -251,12 +247,12 @@ for stain in speckle_stains:
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
 
-    plt.title(f"Distributions of Maximal Information Coeficient (MIC) Scores\nBetween DAPI and {stain} Features per Well", fontsize=16)
+    plt.title(f"Distributions of Maximal Information Coeficient (MIC) Scores\nBetween {comparison_stains[0]} and {comparison_stains[1]} Features per Well", fontsize=16)
 
     plt.xlim(0, 1)
     plt.ylim(0.0, 90.0)
 
-    plt.savefig(distribution_figures_path / f"mic_distributions_dapi_{stain.lower()}_wells.png")
+    plt.savefig(distribution_figures_path / f"mic_distributions_{comparison_stains[0].lower()}_{comparison_stains[1].lower()}_wells.png")
     plt.close()
 
 
