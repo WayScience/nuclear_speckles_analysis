@@ -68,20 +68,149 @@ testing_df = pd.read_parquet(testing_data_path)
 holdout_df = pd.read_parquet(holdout_data_path)
 
 
-# ## Generate list with all models to access
+# ## Generate list of the all feature models
 
 # In[5]:
 
 
-# List all model files in both 'final' and 'shuffled_baseline' folders
-model_files = list(model_dir.rglob('*_tuned_model.joblib'))
+# List all model files in 'final' and 'shuffled_baseline' folders
+all_feature_models = [
+    file for file in model_dir.rglob('*_tuned_model.joblib')
+    if file.parent.name in ['all_features']
+]
 
-len(model_files)
+# Print the number of model files found
+print(len(all_feature_models))
 
-
-# ## Generate and store R2 results across data splits
 
 # In[6]:
+
+
+# Create an empty list to store the results
+all_features_results = []
+
+# Assuming all_feature_models is defined and contains your model files
+for model_file in all_feature_models:
+    # Determine the model type based on whether the filename contains "shuffled"
+    if "shuffled" in model_file.stem:
+        model_type = 'shuffled'
+    else:
+        model_type = 'final'
+
+    # Initialize variables to check for stain
+    stain = None
+    model_name = None
+
+    # Check if the model name contains 'A647' or 'GOLD' to set the appropriate features
+    if 'A647' in model_file.stem:
+        stain = 'A647'
+    elif 'GOLD' in model_file.stem:
+        stain = 'GOLD'
+    else:
+        # Skip if the model name doesn't match any feature group
+        print(f"Skipping {model_file.stem} as it does not match any feature group.")
+        continue
+
+    # Set the stain features based on the identified stain
+    stain_features = a647_features if stain == 'A647' else gold_features
+
+    # Load the model
+    model = joblib.load(model_file)
+
+    # X will contain nucleus features for all splits
+    X_train = training_df[nucleus_features]
+    X_test = testing_df[nucleus_features]
+    X_holdout = holdout_df[nucleus_features]
+
+    # y will be the features matching the stain
+    y_train = training_df[stain_features]
+    y_test = testing_df[stain_features]
+    y_holdout = holdout_df[stain_features]
+
+    # Predict on training, testing, and holdout data
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
+    y_holdout_pred = model.predict(X_holdout)
+
+    # Calculate R2 scores
+    r2_train = r2_score(y_train, y_train_pred)
+    r2_test = r2_score(y_test, y_test_pred)
+    r2_holdout = r2_score(y_holdout, y_holdout_pred)
+
+    # Append results to the list, including 'Model type'
+    all_features_results.append({'Stain': stain, 'Data split': 'Training', 'R2 score': r2_train, 'Model type': model_type})
+    all_features_results.append({'Stain': stain, 'Data split': 'Testing', 'R2 score': r2_test, 'Model type': model_type})
+    all_features_results.append({'Stain': stain, 'Data split': 'Holdout', 'R2 score': r2_holdout, 'Model type': model_type})
+
+# Convert the results into a dataframe
+all_features_results_df = pd.DataFrame(all_features_results)
+
+print(all_features_results_df.shape)
+all_features_results_df
+
+
+# ## Plot R2 score results across stains
+
+# In[7]:
+
+
+# Cap R2 scores below -1 at -1
+all_features_results_df['R2 score'] = all_features_results_df['R2 score'].apply(lambda x: max(x, -1))
+
+# Set the plot style
+sns.set_theme(style="whitegrid")
+
+# Create a faceted grouped bar plot based on 'Stain'
+g = sns.catplot(
+    data=all_features_results_df,
+    x="Data split",
+    y="R2 score",
+    hue="Model type",
+    col="Stain",
+    kind="bar",
+    palette="Dark2",
+    errorbar=None,  # Disable error bars
+    height=5,
+    aspect=1
+)
+
+# Set y-axis limits from 1 to -1 for all facets
+g.set(ylim=(-1, 1))
+
+# Add titles and labels
+g.set_titles("Stain: {col_name}")
+g.set_axis_labels("", "R2 Score")  # Remove x-axis label from individual facets
+
+# Add a single common x-axis label
+g.figure.text(0.5, 0.02, "Data split", ha='center', fontsize=12)
+
+# Save the figure
+g.savefig(f"{figures_dir}/all_features_models_performance_r2.png", dpi=600)
+
+# Show the plot
+plt.show()
+
+
+# We can see that when using all of the features per stain together to predict from the nuclear stain features, we get a pretty low performance fpr both training and testing with very low performance when applied to the other cell line (holdout).
+
+# ## Generate list with all individual models to access
+
+# In[8]:
+
+
+# List all model files in 'final' and 'shuffled_baseline' folders
+model_files = [
+    file for file in model_dir.rglob('*_tuned_model.joblib')
+    if file.parent.name in ['final', 'shuffled_baseline']
+]
+
+# Print the number of model files found
+print(len(model_files))
+
+
+# ## Generate and store R2 results for individual models across data splits
+
+# In[9]:
 
 
 # Create an empty list to store the results
@@ -151,7 +280,7 @@ results_df.head()
 
 # ### Set function
 
-# In[7]:
+# In[10]:
 
 
 # Function to create the plot for each stain
@@ -203,7 +332,7 @@ def boxplot_r2(results_df: pd.DataFrame, palette_dict: dict, datasplit: str) -> 
     plt.tight_layout()
 
     # Save
-    plt.savefig(f"./{figures_dir}/shuffled_versus_final_r2.png", dpi=600)
+    plt.savefig(f"{figures_dir}/shuffled_versus_final_r2.png", dpi=600)
 
     # Show plot
     plt.show()
@@ -211,7 +340,7 @@ def boxplot_r2(results_df: pd.DataFrame, palette_dict: dict, datasplit: str) -> 
 
 # ### Filter only training data and format columns
 
-# In[8]:
+# In[11]:
 
 
 # Only include rows where there is training data
@@ -229,7 +358,7 @@ filtered_results_df.head()
 
 # ### Create color palette for measurements to use for all plots
 
-# In[9]:
+# In[12]:
 
 
 #  Get unique Measurement values to create a consistent color palette
@@ -242,7 +371,7 @@ palette_dict = dict(zip(unique_measurements, palette))
 
 # ### Plot R2 scores between shuffled and final models
 
-# In[10]:
+# In[13]:
 
 
 boxplot_r2(filtered_results_df, palette_dict, "Testing")
@@ -252,7 +381,7 @@ boxplot_r2(filtered_results_df, palette_dict, "Testing")
 
 # ### Function to split features based on stain to have one R2 score per stain
 
-# In[11]:
+# In[14]:
 
 
 def split_r2_score_features(df: pd.DataFrame, split_type: str, model_type: str) -> pd.DataFrame:
@@ -283,6 +412,9 @@ def split_r2_score_features(df: pd.DataFrame, split_type: str, model_type: str) 
     # Step 4: Merge the dataframes based on 'Feature_clean'
     merged_results = pd.merge(a647_scores, gold_scores, on='Feature_clean', how='outer')
 
+    # Step 5: Drop duplicates based on 'Feature_clean'
+    merged_results = merged_results.drop_duplicates(subset='Feature_clean')
+
     # Add columns to indicate the data split and model type
     merged_results['Data split'] = split_type
     merged_results['Model type'] = model_type
@@ -292,7 +424,7 @@ def split_r2_score_features(df: pd.DataFrame, split_type: str, model_type: str) 
 
 # ### Split out the data based on model type and data split to make it easier to process each feature without duplicates
 
-# In[12]:
+# In[15]:
 
 
 # Split the dataframe into 'Training', 'Testing', and 'Holdout' for both 'final' and 'shuffled'
@@ -307,7 +439,7 @@ df_holdout_shuffled = results_df[(results_df['Data split'] == 'Holdout') & (resu
 
 # ### Format the feature and R2 score columns and concat all data back together
 
-# In[13]:
+# In[16]:
 
 
 # Process each subset with designation
@@ -336,7 +468,7 @@ final_results_df.head(10)
 
 # ### Create scatterplot comparing training and testing results
 
-# In[14]:
+# In[17]:
 
 
 # Filter the dataframe for 'Training' and 'Testing' data splits only
@@ -366,7 +498,7 @@ ax.legend(bbox_to_anchor=(1.05, 0.7), loc='upper left')
 plt.tight_layout()
 
 # Save
-plt.savefig(f"./{figures_dir}/training_versus_testing_scatter_r2.png", dpi=600)
+plt.savefig(f"{figures_dir}/training_versus_testing_scatter_r2.png", dpi=600)
 
 # Show plot
 plt.show()
@@ -374,7 +506,7 @@ plt.show()
 
 # ### Create scatterplot comparing holdout and testing results
 
-# In[15]:
+# In[18]:
 
 
 # Filter the dataframe for 'Holdout' and 'Testing' data splits only
@@ -411,7 +543,7 @@ ax.legend(bbox_to_anchor=(1.05, 0.7), loc='upper left')
 plt.tight_layout()
 
 # Save
-plt.savefig(f"./{figures_dir}/holdout_versus_testing_scatter_r2.png", dpi=600)
+plt.savefig(f"{figures_dir}/holdout_versus_testing_scatter_r2.png", dpi=600)
 
 # Show plot
 plt.show()
@@ -423,7 +555,7 @@ plt.show()
 #
 # Note: We know the shuffled models are under performing in the previous plot so we don't need to include it here.
 
-# In[16]:
+# In[19]:
 
 
 # Only include rows where 'Data split' contains 'Holdout'
@@ -438,7 +570,7 @@ holdout_df.sort_values(by='R2 score', ascending=False).head()
 
 # ### Generate boxplot
 
-# In[17]:
+# In[20]:
 
 
 # Replace R2 scores less than -1 with -1
@@ -489,7 +621,7 @@ plt.legend(title='Measurement', bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
 
 # Save
-plt.savefig(f"./{figures_dir}/holdout_a647_versus_gold_r2.png", dpi=600)
+plt.savefig(f"{figures_dir}/holdout_a647_versus_gold_r2.png", dpi=600)
 
 # Show plot
 plt.show()
@@ -503,27 +635,42 @@ plt.show()
 #
 # These will be the same two RadialDistribution features (FracatD and Zernike 2,2).
 
-# In[18]:
+# In[21]:
+
+
+# Filter the dataframe to include only rows where Data split is 'Testing'
+testing_results_df = final_results_df[final_results_df['Data split'] == 'Testing']
+
+# Sort the filtered dataframe by A647 R2 score in descending order
+sorted_a647_df = testing_results_df[
+    ~testing_results_df['A647 R2 score'].isna()
+].sort_values(by='A647 R2 score', ascending=False)
+
+# Display the top rows based on A647 R2 score
+sorted_a647_df.head(10)  # Show the top 10 rows
+
+
+# In[22]:
 
 
 # Create a list to store top features
 top_features_list = []
 
+# Filter the dataframe to include only rows where Data split is 'Testing'
+testing_features_df = final_results_df[final_results_df['Data split'] == 'Testing']
+
 # Iterate over each stain
 for stain in ['A647', 'GOLD']:
     # Filter features for the current stain and sort by R2 score
-    stain_features_df = final_results_df[
-        ~final_results_df[f'{stain} R2 score'].isna()
+    stain_features_df = testing_features_df[
+        ~testing_features_df[f'{stain} R2 score'].isna()
     ].sort_values(by=f'{stain} R2 score', ascending=False)
 
-    # Get the top 2 features for the each stain
-    top_stain_features = stain_features_df.head(4)[f'Feature_{stain}'].tolist()
+    # Get the top 4 features for each stain
+    top_stain_features = stain_features_df.head(2)[f'Feature_{stain}'].tolist()
 
     # Add to the top features list
     top_features_list.extend(top_stain_features)
-
-# Remove duplicates if any
-top_features_list = list(set(top_features_list))
 
 # Print the top features list
 print(len(top_features_list))
@@ -532,7 +679,7 @@ print(top_features_list)
 
 # ### Filter training data to only include metadata and top feature columns
 
-# In[19]:
+# In[23]:
 
 
 # Get all columns with the 'Metadata' prefix
@@ -550,7 +697,7 @@ filtered_training_df.head()
 
 # ### Plot distributions across features per feature
 
-# In[20]:
+# In[24]:
 
 
 # Set the figure size
@@ -579,7 +726,7 @@ plt.tight_layout()
 plt.show()
 
 
-# In[21]:
+# In[25]:
 
 
 # Set the figure size
@@ -608,7 +755,7 @@ plt.tight_layout()
 plt.show()
 
 
-# In[22]:
+# In[26]:
 
 
 # Set the figure size
@@ -637,7 +784,7 @@ plt.tight_layout()
 plt.show()
 
 
-# In[23]:
+# In[27]:
 
 
 # Set the figure size

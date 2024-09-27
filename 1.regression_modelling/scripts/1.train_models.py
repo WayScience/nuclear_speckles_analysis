@@ -46,17 +46,21 @@ model_dir.mkdir(exist_ok=True, parents=True)
 # Make specific folders in model dir for each model type
 final_dir = model_dir / "final"
 final_dir.mkdir(exist_ok=True, parents=True)
+
 shuffled_dir = model_dir / "shuffled_baseline"
 shuffled_dir.mkdir(exist_ok=True, parents=True)
 
-
-# ## Load in training data and categorize the features as nuclear speckle (A647 or GOLD) or nucleus (DAPI) to use for model
-
-# In[3]:
-
+all_features_dir = model_dir / "all_features"
+all_features_dir.mkdir(exist_ok=True, parents=True)
 
 # load in training data
 training_df = pd.read_parquet(pathlib.Path("./data/training_data.parquet"))
+
+
+# ## Categorize the features as nuclear speckle (A647 or GOLD) or nucleus (DAPI) to use for model
+
+# In[3]:
+
 
 # Initialize lists to store column names for each feature group
 nucleus_features = []
@@ -159,7 +163,9 @@ random_search_params = {
 }
 
 
-# ## Train A647 models
+# ## Train models with all A647 or GOLD features
+#
+# Note: Four models in total are created, two for all A647 features (final and shuffled) and two for all GOLD features (final and shuffled).
 
 # In[5]:
 
@@ -167,7 +173,48 @@ random_search_params = {
 # Suppress all warnings
 warnings.filterwarnings("ignore")
 
-for a647_feature in tqdm(a647_features, desc="Processing A647 Features"):
+# List of feature sets to iterate per stain
+feature_sets = [("A647", a647_features), ("GOLD", gold_features)]
+
+# Loop through each feature set
+for feature_name, feature_list in tqdm(feature_sets, desc="Processing all features", leave=False):
+    # Dynamically print progress
+    tqdm.write(f"Processing {feature_name} features...")
+
+    # Combine features into a matrix for the current feature set
+    y_matrix = training_df[feature_list]
+
+    # Initialize the model
+    logreg = ElasticNet(**elasticnet_params)
+
+    # Initialize random search and fit model
+    random_search = RandomizedSearchCV(logreg, **random_search_params)
+    random_search.fit(X, y_matrix)  # Fit using all features as y
+
+    # Save the tuned model for the current feature set
+    model_filename = all_features_dir / f"combined_{feature_name}_tuned_model.joblib"
+    joblib.dump(random_search.best_estimator_, model_filename)
+
+    random_search_shuffled = RandomizedSearchCV(logreg, **random_search_params)
+    random_search_shuffled.fit(X_shuffled, y_matrix)  # Fit on shuffled data
+
+    # Save the shuffled tuned model for the current feature set
+    shuffled_model_filename = all_features_dir / f"combined_{feature_name}_shuffled_tuned_model.joblib"
+    joblib.dump(random_search_shuffled.best_estimator_, shuffled_model_filename)
+
+print("All models for both combined A647 and GOLD features have been trained and tuned!")
+
+
+# ## Train individual A647 models
+
+# In[6]:
+
+
+# Suppress all warnings
+warnings.filterwarnings("ignore")
+
+for a647_feature in tqdm(a647_features, desc="Processing A647 Features", leave=False):
+    # Set predicted feature
     y = training_df[a647_feature]
 
     # Train regular model with hyperparameter tuning
@@ -190,19 +237,15 @@ for a647_feature in tqdm(a647_features, desc="Processing A647 Features"):
     )
     joblib.dump(random_search_shuffled.best_estimator_, shuffled_model_filename)
 
-    # Print confirmation
-    print(f"Trained and saved tuned model for {a647_feature}")
-    print(f"Trained and saved shuffled tuned model for {a647_feature}")
-
 print("All A647 models have been trained and tuned!")
 
 
-# # Train GOLD models
+# ## Train individual GOLD models
 
-# In[6]:
+# In[7]:
 
 
-for gold_feature in tqdm(gold_features, desc="Processing GOLD Features"):
+for gold_feature in tqdm(gold_features, desc="Processing GOLD Features", leave=False):
     y = training_df[gold_feature]
 
     # Train regular model with hyperparameter tuning
@@ -224,10 +267,6 @@ for gold_feature in tqdm(gold_features, desc="Processing GOLD Features"):
         shuffled_dir / f"{gold_feature}_shuffled_tuned_model.joblib"
     )
     joblib.dump(random_search_shuffled.best_estimator_, shuffled_model_filename)
-
-    # Print confirmation
-    print(f"Trained and saved tuned model for {gold_feature}")
-    print(f"Trained and saved shuffled tuned model for {gold_feature}")
 
 print("All GOLD models have been trained and tuned!")
 
