@@ -71,9 +71,12 @@ print(micdf)
 
 plt.figure(figsize=(18, 10))
 sns.histplot(data=micdf, x="Metadata_Cell_Count", kde=False)
-plt.xlabel("Well Cell Count Distribution")
-plt.ylabel("Number of Wells")
-plt.title("Well Cell Counts")
+plt.xlabel("Well Cell Count Distribution", fontsize=18)
+plt.ylabel("Number of Wells", fontsize=18)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.title("Well Cell Counts", fontsize=20)
+plt.tight_layout()
 
 plt.savefig(cell_count_path / "well_cell_counts.png")
 
