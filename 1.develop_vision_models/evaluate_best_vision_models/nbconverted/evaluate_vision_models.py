@@ -179,7 +179,7 @@ for _, model_metadata in model_manifestdf.iterrows():
 
 
 lossdf = pd.DataFrame(losses)
-lossdf.to_csv(metrics_path / "best_model_metrics.csv")
+lossdf.to_csv(metrics_path / "best_model_metrics.csv", index=False)
 
 
 # In[9]:
