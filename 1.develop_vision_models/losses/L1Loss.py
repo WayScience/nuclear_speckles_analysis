@@ -3,11 +3,9 @@ from AbstractLoss import AbstractLoss
 
 
 class L1Loss(AbstractLoss):
+    """Computes and tracks the MAE/L1 Loss."""
 
-    def __init__(
-        self,
-        _metric_name
-    ):
+    def __init__(self, _metric_name: str):
         super(L1Loss, self).__init__()
 
         self.__metric_func = torch.nn.L1Loss(reduction="mean")

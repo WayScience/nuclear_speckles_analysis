@@ -54,9 +54,9 @@ sys.path.append(str((root_dir / "1.develop_vision_models").resolve(strict=True))
 sys.path.append(str((root_dir / "1.develop_vision_models/losses").resolve(strict=True)))
 sys.path.append(str((root_dir / "1.develop_vision_models/models").resolve(strict=True)))
 
-from ImageDataset import ImageDataset
-from L1Loss import L1Loss
+from datasets.ImageDataset import ImageDataset
 from L2Loss import L2Loss
+from losses.L1Loss import L1Loss
 from PSNR import PSNR
 from SSIM import SSIM
 from transforms.CropNPixels import CropNPixels
@@ -81,10 +81,15 @@ mlflow.log_param("random_seed", 0)
 
 
 # Nuclei crops path of treated nuclei in the Dapi channel with all original pixel values
-treated_dapi_crops = (root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops_same_background").resolve(strict=True)
+treated_dapi_crops = (
+    root_dir
+    / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops_same_background"
+).resolve(strict=True)
 
 # Nuclei crops path of nuclei in the Gold channel with all original pixel values
-gold_crops = (root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei_same_background").resolve(strict=True)
+gold_crops = (
+    root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei_same_background"
+).resolve(strict=True)
 
 # Contains model metadata
 model_manifestdf = pd.read_csv("model_manifest.csv")
@@ -108,7 +113,7 @@ loss_funcs = {
     "l1_loss": L1Loss(_metric_name="l1_loss"),
     "l2_loss": L2Loss(_metric_name="l2_loss"),
     "psnr": PSNR(_metric_name="psnr"),
-    "ssim": SSIM(_metric_name="ssim")
+    "ssim": SSIM(_metric_name="ssim"),
 }
 
 losses = defaultdict(list)
@@ -119,16 +124,20 @@ for _, model_metadata in model_manifestdf.iterrows():
 
     if "fnet" in model_metadata["model_name"]:
 
-        input_transforms = A.Compose([
-            MinMaxNormalize(_normalization_factor=(2 ** 16) - 1, _always_apply=True),
-            CropNPixels(_pixel_count=1, _always_apply=True)
-        ])
+        input_transforms = A.Compose(
+            [
+                MinMaxNormalize(_normalization_factor=(2**16) - 1, _always_apply=True),
+                CropNPixels(_pixel_count=1, _always_apply=True),
+            ]
+        )
 
     else:
 
-        input_transforms = A.Compose([
-            MinMaxNormalize(_normalization_factor=(2 ** 16) - 1, _always_apply=True),
-        ])
+        input_transforms = A.Compose(
+            [
+                MinMaxNormalize(_normalization_factor=(2**16) - 1, _always_apply=True),
+            ]
+        )
 
     target_transforms = copy.deepcopy(input_transforms)
 
@@ -136,43 +145,62 @@ for _, model_metadata in model_manifestdf.iterrows():
         _input_dir=treated_dapi_crops,
         _target_dir=gold_crops,
         _input_transform=input_transforms,
-        _target_transform=target_transforms
+        _target_transform=target_transforms,
     )
 
     # Same splitting procedure as in model trainers
     train_size = int(0.7 * len(img_dataset))
     val_size = int(0.15 * len(img_dataset))
     test_size = len(img_dataset) - train_size - val_size
-    train_dataset, val_dataset, _ = random_split(img_dataset, [train_size, val_size, test_size])
+    train_dataset, val_dataset, _ = random_split(
+        img_dataset, [train_size, val_size, test_size]
+    )
 
     with torch.no_grad():
 
-        generator_model = mlflow.pytorch.load_model(model_metadata["model_path"]).eval().to(device)
+        generator_model = (
+            mlflow.pytorch.load_model(model_metadata["model_path"]).eval().to(device)
+        )
+
         val_metric_counts = defaultdict(float)
         train_metric_counts = defaultdict(float)
 
         for input, target in val_dataset:
+
+            # Format target and input images
             target = target.unsqueeze(0).to(device)
             output = generator_model(input.unsqueeze(0).to(device))
 
+            # Accumulate losses
             for loss_name, loss_func in loss_funcs.items():
-                val_metric_counts[loss_name] += loss_func(_generated_outputs=output, _targets=target)
+                val_metric_counts[loss_name] += loss_func(
+                    _generated_outputs=output, _targets=target
+                )
 
         for input, target in train_dataset:
+
             target = target.unsqueeze(0).to(device)
             output = generator_model(input.unsqueeze(0).to(device))
 
             for loss_name, loss_func in loss_funcs.items():
-                train_metric_counts[loss_name] += loss_func(_generated_outputs=output, _targets=target)
+                train_metric_counts[loss_name] += loss_func(
+                    _generated_outputs=output, _targets=target
+                )
 
+        # Create Tidy format
         losses["model_name"].append(model_metadata["model_name"])
         losses["model_name"].append(model_metadata["model_name"])
         losses["datasplit"].append("training")
         losses["datasplit"].append("validation")
 
+        # Normalize Losses
         for loss_name, loss_func in loss_funcs.items():
-            losses[loss_name].append(train_metric_counts[loss_name].item() / len(train_dataset))
-            losses[loss_name].append(val_metric_counts[loss_name].item() / len(val_dataset))
+            losses[loss_name].append(
+                train_metric_counts[loss_name].item() / len(train_dataset)
+            )
+            losses[loss_name].append(
+                val_metric_counts[loss_name].item() / len(val_dataset)
+            )
 
 
 # In[8]:
