@@ -72,23 +72,33 @@ random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
 
-mlflow.log_param("random_seed", 0)
-
 
 # # Inputs
 
 # In[5]:
 
 
+treated_dapi_crops, gold_crops = {}, {}
+
 # Nuclei crops path of treated nuclei in the Dapi channel with all original pixel values
-treated_dapi_crops = (
+treated_dapi_crops["same_background"] = (
     root_dir
     / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops_same_background"
 ).resolve(strict=True)
 
 # Nuclei crops path of nuclei in the Gold channel with all original pixel values
-gold_crops = (
+gold_crops["same_background"] = (
     root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei_same_background"
+).resolve(strict=True)
+
+# Nuclei crops path of treated nuclei in the Dapi channel with black backgrounds
+treated_dapi_crops["black_background"] = (
+    root_dir / "vision_nuclear_speckle_prediction/treated_nuclei_dapi_crops"
+).resolve(strict=True)
+
+# Nuclei crops path of nuclei in the Gold channel with black backgrounds
+gold_crops["black_background"] = (
+    root_dir / "vision_nuclear_speckle_prediction/gold_cropped_nuclei"
 ).resolve(strict=True)
 
 # Contains model metadata
@@ -142,8 +152,16 @@ for _, model_metadata in model_manifestdf.iterrows():
     target_transforms = copy.deepcopy(input_transforms)
 
     img_dataset = ImageDataset(
-        _input_dir=treated_dapi_crops,
-        _target_dir=gold_crops,
+        _input_dir=(
+            treated_dapi_crops["same_background"]
+            if "same_background" in model_metadata["model_name"]
+            else treated_dapi_crops["same_background"]
+        ),
+        _target_dir=(
+            gold_crops["same_background"]
+            if "same_background" in model_metadata["model_name"]
+            else gold_crops["same_background"]
+        ),
         _input_transform=input_transforms,
         _target_transform=target_transforms,
     )
