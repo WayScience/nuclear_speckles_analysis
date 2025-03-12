@@ -17,5 +17,7 @@ dependencies:
   - conda-forge::ipython
   - conda-forge::notebook
   - conda-forge::minepy
+  - conda-forge::scipy
+  - conda-forge::pyrsistent  # Needed to nbconvert jupyter notebooks
   - pip:
-    - mlflow
+      - mlflow
