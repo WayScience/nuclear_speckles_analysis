@@ -120,11 +120,15 @@ print(feature_similaritiesdf.head())
 
 plt.figure(figsize=(20, 10))
 sns.scatterplot(
-    x="cp_feature", y="symmetric_wasserstein_distance", data=feature_similaritiesdf
+    x="symmetric_wasserstein_distance", y="cp_feature", data=feature_similaritiesdf
 )
-plt.xticks(rotation=90)
 
-plt.title("Wasserstein Feature Similarities (Generated v.s. Target) distributions")
+plt.ylabel("CellProfiler Cropped Image Features")
+plt.xlabel("Symmetric Wasserstein Distance")
+
+plt.title("Wasserstein Feature Similarities (Generated v.s. Target) Distributions")
+yticks = plt.gca().get_yticks()
+plt.yticks(yticks[::2])
 plt.tight_layout()
 plt.savefig(figure_path / "wasserstein_feature_similarity.png")
 
