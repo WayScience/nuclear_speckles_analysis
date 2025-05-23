@@ -5,7 +5,7 @@ channels:
   - nvidia
   - conda-forge
 dependencies:
-  - conda-forge::python=3.11
+  - conda-forge::python=3.9
   - conda-forge::pip
   - pytorch::pytorch
   - pytorch::torchvision
@@ -24,7 +24,17 @@ dependencies:
   - conda-forge::pyarrow
   - conda-forge::ipython
   - conda-forge::notebook
-  - conda-forge::albumentations
   - conda-forge::optuna
+  - conda-forge::mysqlclient
+  - conda-forge::openjdk
+  - conda-forge::gtk2
+  - conda-forge::typing-extensions
+  - conda-forge::Jinja2
+  - conda-forge::inflect
+  - conda-forge::wxpython
+  - conda-forge::sentry-sdk
+  - conda-forge::python-cityhash
   - pip:
-    - mlflow
+      - mlflow
+      - albumentations
+      - cellprofiler==4.2.8
