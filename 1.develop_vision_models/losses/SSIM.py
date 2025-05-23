@@ -27,7 +27,7 @@ class SSIM(AbstractLoss):
         c2 = (self.__max_pixel_value * 0.03) ** 2
 
         ssim_value = ((2 * mu1 * mu2 + c1) * (2 * sigma12 + c2)) / (
-            (mu1**2 + mu2**2 + c1) * (sigma1_sq**2 + sigma2_sq**2 + c2)
+            (mu1**2 + mu2**2 + c1) * (sigma1_sq + sigma2_sq + c2)
         )
 
         return ssim_value.mean()

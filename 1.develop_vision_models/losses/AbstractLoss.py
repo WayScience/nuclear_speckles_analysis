@@ -13,6 +13,6 @@ class AbstractLoss(nn.Module, ABC):
         pass
 
     @abstractmethod
-    def forward(self):
+    def forward(self, **kwargs):
         """Computes the metric given information about the data."""
         pass
