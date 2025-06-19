@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader, random_split
 
 
-class ModelTrainer:
+class FnetModelTrainer:
     """
     Orchestrates training and evaluation of paired stain-to-stain translational modeling.
     """

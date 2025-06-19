@@ -5,7 +5,7 @@
 # The 2d fnet architecture (https://doi.org/10.1038/s41592-018-0111-2) is trained to predict the GOLD stain from cropped DAPI Nuclei Images.
 # This model was trained on a similar task, therefore, we are interested in the model's performance when trained on our task.
 
-# In[1]:
+# In[ ]:
 
 
 import pathlib
@@ -27,7 +27,7 @@ import torch.optim as optim
 
 # ## Find the root of the git repo on the host system
 
-# In[2]:
+# In[ ]:
 
 
 # Get the current working directory
@@ -50,21 +50,21 @@ if root_dir is None:
 
 # ## Custom Imports
 
-# In[3]:
+# In[ ]:
 
 
 sys.path.append(str((root_dir / "1.develop_vision_models").resolve(strict=True)))
 
-from ImageDataset import ImageDataset
+from datasets.ImageDataset import ImageDataset
 from models.fnet_nn_2d import Net
-from ModelTrainer import ModelTrainer
+from trainers.FnetModelTrainer import FnetModelTrainer
 from transforms.CropNPixels import CropNPixels
 from transforms.MinMaxNormalize import MinMaxNormalize
 
 
 # ## Set random seeds
 
-# In[4]:
+# In[1]:
 
 
 random.seed(0)
@@ -75,7 +75,7 @@ mlflow.log_param("random_seed", 0)
 
 # # Inputs
 
-# In[5]:
+# In[ ]:
 
 
 # Nuclei crops path of treated nuclei in the Dapi channel with all original pixel values
@@ -96,7 +96,7 @@ scdfs = pd.concat(scdfs, axis=0).reset_index(drop=True)
 
 # # Outputs
 
-# In[6]:
+# In[ ]:
 
 
 figure_path = pathlib.Path("fnet_validation_images")
@@ -109,7 +109,7 @@ model_path = pathlib.Path("model")
 model_path.mkdir(parents=True, exist_ok=True)
 
 
-# In[7]:
+# In[ ]:
 
 
 description = "Here we leverage the 2d fnet architecture in https://doi.org/10.1038/s41592-018-0111-2 to predict the GOLD stain from cropped DAPI Nuclei Images. We retain all pixel values in the cropped images, and normalize these pixels using min-max normalization. We also crop one additional pixel from each side of each image to satisfy a dimensionality requirement for the network."
@@ -118,7 +118,7 @@ mlflow.set_tag("mlflow.note.content", description)
 
 # # Image Generation Functions
 
-# In[8]:
+# In[ ]:
 
 
 def format_img(_tensor_img: torch.Tensor) -> np.ndarray:
@@ -129,7 +129,7 @@ def format_img(_tensor_img: torch.Tensor) -> np.ndarray:
     return (torch.squeeze(_tensor_img) * norm_factor).to(torch.uint16).cpu().numpy()
 
 
-# In[9]:
+# In[ ]:
 
 
 def evaluate_and_format_imgs(_input: torch.Tensor, _target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -147,7 +147,7 @@ def evaluate_and_format_imgs(_input: torch.Tensor, _target: torch.Tensor) -> Tup
 
 # # Initialize and Train Model
 
-# In[10]:
+# In[ ]:
 
 
 input_transforms = A.Compose([
@@ -165,7 +165,7 @@ img_dataset = ImageDataset(
 )
 
 
-# In[11]:
+# In[ ]:
 
 
 model = Net()
@@ -175,7 +175,7 @@ model.to(device)
 mlflow.set_tag("model_architecture", "fnet")
 
 
-# In[12]:
+# In[ ]:
 
 
 optim_params = {
@@ -192,7 +192,7 @@ mlflow.log_param("Optimizer", "ADAM")
 mlflow.log_params(optim_params)
 
 
-# In[13]:
+# In[2]:
 
 
 # These keys will be in the names of the logged losses
@@ -206,7 +206,7 @@ backprop_loss_name = "mae_loss"
 mlflow.log_param("Training Loss", backprop_loss_name)
 
 
-# In[14]:
+# In[ ]:
 
 
 trainer_params = {
@@ -219,10 +219,10 @@ mlflow.log_params(trainer_params)
 trainer_params = {f"_{param_name}": param_value for param_name, param_value in trainer_params.items()}
 
 
-# In[15]:
+# In[ ]:
 
 
-trainer = ModelTrainer(
+trainer = FnetModelTrainer(
     _model=model,
     _image_dataset=img_dataset,
     _optimizer=optimizer,
@@ -232,7 +232,7 @@ trainer = ModelTrainer(
 )
 
 
-# In[16]:
+# In[ ]:
 
 
 trainer.train()
@@ -241,7 +241,7 @@ trainer.train()
 # # Generate Images
 # Evaluate the model by generating the same number of example images for each siRNA.
 
-# In[17]:
+# In[ ]:
 
 
 example_images_per_sirna = 10
@@ -298,7 +298,7 @@ for input, target in iter(trainer.val_dataset):
 
 # # Log Metrics and Model
 
-# In[18]:
+# In[ ]:
 
 
 client = mlflow.MlflowClient()
@@ -318,7 +318,7 @@ metricsdf["epoch"] = np.arange(metricsdf.shape[0])
 metricsdf.to_csv(metrics_path / "fnet_metrics_per_epoch.csv", index=False)
 
 
-# In[19]:
+# In[3]:
 
 
 mlflow.pytorch.log_model(pytorch_model=model.cpu(), artifact_path="model", conda_env=str(root_dir / "1.develop_vision_models" / "environment.yml"))
