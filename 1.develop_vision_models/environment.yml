@@ -1,4 +1,4 @@
-name: speckle_analysis
+name: speckle_vision_models
 channels:
   - anaconda
   - pytorch
