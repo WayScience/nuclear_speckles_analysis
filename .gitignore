@@ -6,3 +6,6 @@ data*
 
 # Ignore single-cell crops
 sc_crops*
+
+# Ignore local agent instructions
+AGENTS.md

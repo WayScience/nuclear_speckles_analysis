@@ -1,0 +1,17 @@
+name: cell_segmentation_gff
+
+entry_points:
+  train_model:
+    parameters:
+      epochs: {type: int, default: 20}
+      n_trials: {type: int, default: 4}
+      max_train_batches: {type: int, default: -1}
+      max_eval_batches: {type: int, default: -1}
+      enable_image_savers: {type: int, default: 1}
+    command: >
+      uv run train.py
+      --epochs {epochs}
+      --n-trials {n_trials}
+      --max-train-batches {max_train_batches}
+      --max-eval-batches {max_eval_batches}
+      --enable-image-savers {enable_image_savers}
