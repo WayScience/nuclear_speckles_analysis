@@ -136,7 +136,16 @@ def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str
         return False, []
 
     for row in rows:
-        if not pathlib.Path(row["input_path"]).exists() or not pathlib.Path(row["target_path"]).exists():
+        sample_id = row["sample_id"]
+        if "center_x=" not in sample_id or "center_y=" not in sample_id:
+            return False, []
+
+        input_path = pathlib.Path(row["input_path"])
+        target_path = pathlib.Path(row["target_path"])
+        if not input_path.exists() or not target_path.exists():
+            return False, []
+
+        if input_path.stem != sample_id or target_path.stem != sample_id:
             return False, []
 
     return True, rows
@@ -240,7 +249,7 @@ def ensure_dapi_to_gold_cache(
         for col in bbox_cols:
             image_df[col] = image_df[col].astype(int)
 
-        for nucleus_idx, nucleus in image_df.iterrows():
+        for _, nucleus in image_df.iterrows():
             x0 = int(nucleus["Nuclei_AreaShape_BoundingBoxMinimum_X"])
             y0 = int(nucleus["Nuclei_AreaShape_BoundingBoxMinimum_Y"])
             x1 = int(nucleus["Nuclei_AreaShape_BoundingBoxMaximum_X"])
@@ -265,8 +274,11 @@ def ensure_dapi_to_gold_cache(
             if padded_dapi.max() == 0 or padded_gold.max() == 0:
                 continue
 
+            center_x = (x0 + x1) // 2
+            center_y = (y0 + y1) // 2
+
             sample_id = (
-                f"plate={plate_name}|well={well_name}|site={site_name}|nucleus={nucleus_idx}"
+                f"plate={plate_name}|well={well_name}|site={site_name}|center_x={center_x}|center_y={center_y}"
             )
             group_id = f"plate={plate_name}|well={well_name}|site={site_name}"
 
