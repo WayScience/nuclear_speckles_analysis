@@ -8,7 +8,7 @@ from metrics.AbstractMetric import AbstractMetric
 
 class UNetTrainer:
     """
-    Orchestrates training and evaluation of segmentation modeling from brightfield images.
+    Orchestrates training and evaluation of image-to-image translation models.
     """
 
     def __init__(

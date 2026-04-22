@@ -1,5 +1,5 @@
 [project]
-name = "nf1-organoid-cell-segmentation"
+name = "nuclear-speckles-analysis"
 version = "0.1.0"
 description = "Deep learning vision model for DAPI-to-gold image translation on cropped nuclei."
 readme = "README.md"

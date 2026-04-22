@@ -1,4 +1,4 @@
-name: cell_segmentation_gff
+name: nuclear_speckles_analysis
 
 entry_points:
   train_model:
