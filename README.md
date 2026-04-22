@@ -14,7 +14,12 @@ Training uses cached, filtered single-cell crops generated from:
 - `nuclear_speckles_data/IC_corrected_images`
 - `nuclear_speckles_data/Preprocessed_data/single_cell_profiles/*annotated*.parquet`
 
-`datasets/dataset_00/utils/CropCacheBuilder.py` builds the crop cache and manifest when needed.
+`datasets/dataset_00/utils/CropCacheBuilder.py` builds the crop cache and manifest when needed. Plate, well, site, and channel metadata are parsed from `IC_corrected_images` filenames split by `_`:
+
+- field 1: plate
+- field 2: well
+- field 3: site
+- field 4: channel (`CH0` for DAPI input, `CH2` for Gold target)
 
 ### Normalization
 
