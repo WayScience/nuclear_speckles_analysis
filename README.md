@@ -48,5 +48,5 @@ Metrics are implemented in `metrics/` and logged through `callbacks/Callbacks.py
 
 ## Outputs
 
-- Crop-level prediction artifacts can be logged each epoch via `callbacks/utils/SaveEpochSlices.py`.
+- Crop-level prediction artifacts can be logged each epoch via `callbacks/utils/SaveEpochCrops.py`.
 - Whole-FOV reconstruction and patch stitching are intentionally removed.

@@ -18,6 +18,6 @@ class Comparator(ABC):
 
     @abstractmethod
     def __call__(self, _group0, _group1):
-        """Compute and record a comparison between two grouped data slices."""
+        """Compute and record a comparison between two grouped data crops."""
 
         pass

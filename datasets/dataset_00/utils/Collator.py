@@ -10,8 +10,8 @@ def collator(batch):
     """
     collated = {}
     skip_collate_subkeys = {
-        "Metadata_Input_Slices",
-        "Metadata_Target_Slices",
+        "Metadata_Input_Crops",
+        "Metadata_Target_Crops",
         "Metadata_Crop_Coordinates",
         "Metadata_Dataset_ID",
     }

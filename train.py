@@ -11,8 +11,8 @@ import torch
 
 from callbacks.Callbacks import Callbacks
 from callbacks.utils.SampleImages import SampleImages
-from callbacks.utils.SaveEpochSlices import SaveEpochSlices
-from datasets.dataset_00.CellSlicetoSliceDataset import CellSlicetoSliceDataset
+from callbacks.utils.SaveEpochCrops import SaveEpochCrops
+from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
     ensure_dapi_to_gold_cache,
     load_cache_manifest,
@@ -156,7 +156,7 @@ mlflow.log_param("target_max_pixel_value", image_specs["target_max_pixel_value"]
 image_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
 image_postprocessor = ImagePostProcessor()
 
-crop_image_dataset = CellSlicetoSliceDataset(
+crop_image_dataset = CellCropToCropDataset(
     manifest_rows=manifest_rows,
     image_specs=image_specs,
     image_preprocessor=image_preprocessor,
@@ -172,7 +172,7 @@ hash_splitter = HashSplitter(
 _, val_dataloader, _ = hash_splitter(batch_size=16)
 crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 32)()
 
-image_prediction_saver = SaveEpochSlices(
+image_prediction_saver = SaveEpochCrops(
     image_dataset=val_dataloader.dataset.dataset,
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=crop_dataset_idxs,

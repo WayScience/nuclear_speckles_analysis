@@ -243,14 +243,14 @@ def _infer_image_specs(rows: list[dict[str, str]]) -> dict[str, Any]:
         Dictionary with max pixel values, image shape, and crop margin.
 
     Raises:
-        ValueError: If cached images are not 2D slices.
+        ValueError: If cached images are not 2D crops.
     """
 
     input_example = tifffile.imread(rows[0]["input_path"])
     target_example = tifffile.imread(rows[0]["target_path"])
 
     if input_example.ndim != 2 or target_example.ndim != 2:
-        raise ValueError("Cached crop images must be single 2D slices.")
+        raise ValueError("Cached crop images must be single 2D crops.")
 
     return {
         "input_max_pixel_value": float(np.iinfo(input_example.dtype).max),
@@ -344,7 +344,7 @@ def ensure_dapi_to_gold_cache(
 
         if dapi_mask.ndim != 2 or dapi_img.ndim != 2 or gold_img.ndim != 2:
             raise ValueError(
-                "Expected 2D CH0 mask, DAPI image, and Gold image after selecting a single z-slice."
+                "Expected 2D CH0 mask, DAPI image, and Gold image after selecting a single z-crop."
             )
 
         image_df = image_df.copy()
