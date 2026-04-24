@@ -10,7 +10,6 @@ This repository trains a UNet-style image-to-image translation model on cropped 
 
 Training uses cached, filtered single-cell crops generated from:
 
-- `nuclear_speckles_data/Nuclear_masks`
 - `nuclear_speckles_data/IC_corrected_images`
 - `nuclear_speckles_data/Preprocessed_data/single_cell_profiles/*annotated*.parquet`
 
