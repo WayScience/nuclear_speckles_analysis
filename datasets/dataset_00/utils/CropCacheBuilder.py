@@ -1,5 +1,6 @@
 import csv
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -212,9 +213,12 @@ def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str
     if not required_fields.issubset(rows[0].keys()):
         return False, []
 
+    center_x_pattern = re.compile(r"(?:^|\|)center_x=-?\d+\.\d{6}(?:\||$)")
+    center_y_pattern = re.compile(r"(?:^|\|)center_y=-?\d+\.\d{6}(?:\||$)")
+
     for row in rows:
         sample_id = row["sample_id"]
-        if "center_x=" not in sample_id or "center_y=" not in sample_id:
+        if not center_x_pattern.search(sample_id) or not center_y_pattern.search(sample_id):
             return False, []
 
         # Reuse is only safe when paths and sample IDs still match on-disk files.
@@ -379,11 +383,11 @@ def ensure_dapi_to_gold_cache(
             if padded_dapi.max() == 0 or padded_gold.max() == 0:
                 continue
 
-            center_x = (x0 + x1) // 2
-            center_y = (y0 + y1) // 2
+            center_x = (x0 + x1) / 2
+            center_y = (y0 + y1) / 2
 
             sample_id = (
-                f"plate={plate_name}|well={well_name}|site={site_name}|center_x={center_x}|center_y={center_y}"
+                f"plate={plate_name}|well={well_name}|site={site_name}|center_x={center_x:.6f}|center_y={center_y:.6f}"
             )
             group_id = f"plate={plate_name}|well={well_name}|site={site_name}"
 
