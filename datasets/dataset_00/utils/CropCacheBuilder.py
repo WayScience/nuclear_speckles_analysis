@@ -227,7 +227,15 @@ def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str
         if not input_path.exists() or not target_path.exists():
             return False, []
 
-        if input_path.stem != sample_id or target_path.stem != sample_id:
+        is_legacy_layout = input_path.stem == sample_id and target_path.stem == sample_id
+        is_identifier_dir_layout = (
+            input_path.name == "dapi_cropped_image.tiff"
+            and target_path.name == "gold_cropped_image.tiff"
+            and input_path.parent.name == sample_id
+            and target_path.parent.name == sample_id
+        )
+
+        if not (is_legacy_layout or is_identifier_dir_layout):
             return False, []
 
     return True, rows
@@ -278,11 +286,6 @@ def ensure_dapi_to_gold_cache(
     """
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    input_dir = cache_dir / "inputs"
-    target_dir = cache_dir / "targets"
-    input_dir.mkdir(parents=True, exist_ok=True)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     manifest_path = cache_dir / "manifest.csv"
 
     is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
@@ -391,8 +394,11 @@ def ensure_dapi_to_gold_cache(
             )
             group_id = f"plate={plate_name}|well={well_name}|site={site_name}"
 
-            input_path = input_dir / f"{sample_id}.tiff"
-            target_path = target_dir / f"{sample_id}.tiff"
+            sample_dir = cache_dir / sample_id
+            sample_dir.mkdir(parents=True, exist_ok=True)
+
+            input_path = sample_dir / "dapi_cropped_image.tiff"
+            target_path = sample_dir / "gold_cropped_image.tiff"
 
             if not input_path.exists():
                 tifffile.imwrite(input_path, padded_dapi)
