@@ -10,11 +10,30 @@ import tifffile
 
 @dataclass
 class CropCacheResult:
+    """Output metadata returned after building or validating a crop cache.
+
+    Attributes:
+        manifest_path: CSV manifest containing one row per cached crop pair.
+        image_specs: Normalization and shape metadata inferred from cached images.
+    """
+
     manifest_path: pathlib.Path
     image_specs: dict[str, Any]
 
 
 def _parse_image_filename(filename: str) -> tuple[str, str, str, str]:
+    """Extract plate, well, site, and channel tokens from an image filename.
+
+    Args:
+        filename: Image filename expected to contain underscore-delimited metadata.
+
+    Returns:
+        A tuple of (plate, well, site, channel).
+
+    Raises:
+        ValueError: If the filename stem does not contain at least four fields.
+    """
+
     stem = pathlib.Path(filename).stem
     parts = stem.split("_")
     if len(parts) < 4:
@@ -23,6 +42,15 @@ def _parse_image_filename(filename: str) -> tuple[str, str, str, str]:
 
 
 def _build_ic_corrected_image_index(original_img_dir: pathlib.Path) -> dict[tuple[str, str, str], dict[str, pathlib.Path]]:
+    """Index IC-corrected images by (plate, well, site) and channel.
+
+    Args:
+        original_img_dir: Root directory containing IC-corrected TIFF images.
+
+    Returns:
+        Nested mapping keyed by (plate, well, site) and then channel name.
+    """
+
     image_index: dict[tuple[str, str, str], dict[str, pathlib.Path]] = {}
 
     for image_path in sorted(original_img_dir.glob("**/*.tiff")):
@@ -36,17 +64,44 @@ def _build_ic_corrected_image_index(original_img_dir: pathlib.Path) -> dict[tupl
 
 
 def _filter_bounding_box_size(scdf: pd.DataFrame, bounding_box_col: str) -> pd.DataFrame:
+    """Remove extreme bounding-box outliers using median absolute deviation.
+
+    Args:
+        scdf: Single-cell profile rows.
+        bounding_box_col: Bounding-box size column to filter on.
+
+    Returns:
+        Filtered DataFrame copy that excludes rows with robust z-score >= 3.
+    """
+
     median = scdf[bounding_box_col].median()
     absolute_dev = (scdf[bounding_box_col] - median).abs()
     mad = absolute_dev.median()
     if mad == 0:
+        # If all values are identical (or nearly so), robust scaling is undefined.
         return scdf
+    # Robust z-score based on MAD keeps filtering stable against heavy tails.
     robust_z = (scdf[bounding_box_col] - median) / mad
     return scdf.loc[robust_z < 3].copy()
 
 
 def _add_padding(image: np.ndarray, target_width: int, target_height: int) -> np.ndarray:
+    """Pad a 2D crop to the target size with centered zero padding.
+
+    Args:
+        image: Input crop image.
+        target_width: Desired output width.
+        target_height: Desired output height.
+
+    Returns:
+        Padded image with shape (target_height, target_width).
+
+    Raises:
+        ValueError: If target size is smaller than the input crop.
+    """
+
     height, width = image.shape[:2]
+    # Split extra pixels across both sides to keep the crop centered.
     top = (target_height - height) // 2
     bottom = target_height - height - top
     left = (target_width - width) // 2
@@ -62,6 +117,19 @@ def _add_padding(image: np.ndarray, target_width: int, target_height: int) -> np
 
 
 def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
+    """Load, align, and filter annotated single-cell profile tables.
+
+    Args:
+        data_dir: Dataset root directory.
+
+    Returns:
+        Profile DataFrame with required metadata and cleaned bounding-box columns.
+
+    Raises:
+        FileNotFoundError: If annotated parquet profile files are missing.
+        ValueError: If required profile columns are missing.
+    """
+
     profile_dir = data_dir / "Preprocessed_data" / "single_cell_profiles"
     profile_paths = sorted(profile_dir.glob("*annotated*.parquet"))
     if not profile_paths:
@@ -111,6 +179,15 @@ def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
 
 
 def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str, str]]]:
+    """Check whether an existing cache manifest can be reused safely.
+
+    Args:
+        manifest_path: Path to the cache CSV manifest.
+
+    Returns:
+        Tuple of (is_valid, rows). Rows are returned only when valid.
+    """
+
     if not manifest_path.exists():
         return False, []
 
@@ -140,6 +217,7 @@ def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str
         if "center_x=" not in sample_id or "center_y=" not in sample_id:
             return False, []
 
+        # Reuse is only safe when paths and sample IDs still match on-disk files.
         input_path = pathlib.Path(row["input_path"])
         target_path = pathlib.Path(row["target_path"])
         if not input_path.exists() or not target_path.exists():
@@ -152,6 +230,18 @@ def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str
 
 
 def _infer_image_specs(rows: list[dict[str, str]]) -> dict[str, Any]:
+    """Infer image normalization and shape metadata from cached crops.
+
+    Args:
+        rows: Manifest rows containing absolute crop file paths.
+
+    Returns:
+        Dictionary with max pixel values, image shape, and crop margin.
+
+    Raises:
+        ValueError: If cached images are not 2D slices.
+    """
+
     input_example = tifffile.imread(rows[0]["input_path"])
     target_example = tifffile.imread(rows[0]["target_path"])
 
@@ -170,6 +260,19 @@ def ensure_dapi_to_gold_cache(
     data_dir: pathlib.Path,
     cache_dir: pathlib.Path,
 ) -> CropCacheResult:
+    """Build or reuse a CH0(DAPI) to CH2(Gold) crop cache.
+
+    Args:
+        data_dir: Dataset root containing masks, images, and profile tables.
+        cache_dir: Destination directory for cached crop TIFFs and manifest.
+
+    Returns:
+        Manifest path plus inferred image specs for training configuration.
+
+    Raises:
+        ValueError: If no valid crop pairs can be produced.
+    """
+
     cache_dir.mkdir(parents=True, exist_ok=True)
     input_dir = cache_dir / "inputs"
     target_dir = cache_dir / "targets"
@@ -180,6 +283,7 @@ def ensure_dapi_to_gold_cache(
 
     is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
     if is_valid:
+        # Fast path: manifest already points to valid, existing cached crops.
         return CropCacheResult(
             manifest_path=manifest_path,
             image_specs=_infer_image_specs(rows=existing_rows),
@@ -262,6 +366,7 @@ def ensure_dapi_to_gold_cache(
             if cropped_dapi.size == 0 or cropped_gold.size == 0:
                 continue
 
+            # Skip empty-signal crops before and after mask application.
             if cropped_dapi.max() == 0 or cropped_gold.max() == 0:
                 continue
 
@@ -329,6 +434,18 @@ def ensure_dapi_to_gold_cache(
 
 
 def load_cache_manifest(manifest_path: pathlib.Path) -> list[dict[str, str]]:
+    """Load a cache manifest into memory.
+
+    Args:
+        manifest_path: Path to a cache manifest CSV.
+
+    Returns:
+        List of manifest rows as dictionaries.
+
+    Raises:
+        ValueError: If the manifest has no data rows.
+    """
+
     with manifest_path.open("r", newline="") as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)

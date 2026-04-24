@@ -19,6 +19,14 @@ class HashSplitter:
         train_frac: float = 0.8,
         val_frac: float = 0.1,
     ) -> None:
+        """Initialize deterministic hash-based split configuration.
+
+        Args:
+            dataset: Dataset that exposes ``Metadata_ID`` in sample metadata.
+            train_frac: Fraction of samples assigned to the training split.
+            val_frac: Fraction of samples assigned to the validation split.
+        """
+
         dataset.split_data = True
         self.dataset = dataset
         self.train_frac = train_frac
@@ -26,6 +34,8 @@ class HashSplitter:
         self.splits = None
 
     def split_by_hash(self) -> None:
+        """Assign dataset indices to train/val/test splits using hash buckets."""
+
         divisor = 10**6
         self.upper_train_thresh = int(self.train_frac * divisor)
         self.upper_val_thresh = int(self.val_frac * divisor) + self.upper_train_thresh
@@ -41,11 +51,21 @@ class HashSplitter:
                 self.splits["test"].append(idx)
 
     def __call__(self, batch_size: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
+        """Build dataloaders for train/validation/test splits.
+
+        Args:
+            batch_size: Batch size for all returned dataloaders.
+
+        Returns:
+            Tuple of ``(train_loader, val_loader, test_loader)``.
+        """
 
         if self.splits is None:
             self.split_by_hash()
 
         def make_loader(indices, shuffle):
+            """Create a subset dataloader with repo-specific collation."""
+
             return DataLoader(
                 Subset(self.dataset, indices),
                 batch_size=batch_size,

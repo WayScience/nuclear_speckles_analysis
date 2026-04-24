@@ -17,6 +17,8 @@ def collator(batch):
     }
 
     def tensor_to_list(v):
+        """Convert tensor-like values to Python lists when needed for metadata."""
+
         if hasattr(v, "tolist"):
             return v.tolist()
         return v

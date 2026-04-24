@@ -19,6 +19,20 @@ class CellSlicetoSliceDataset(Dataset):
         input_image_name: str = "input_image.tiff",
         target_image_name: str = "target_image.tiff",
     ):
+        """Initialize dataset state from a crop manifest.
+
+        Args:
+            manifest_rows: Rows loaded from the crop cache manifest.
+            image_specs: Preprocessing metadata (normalization constants, shape).
+            image_preprocessor: Callable that formats input and target tensors.
+            image_cache_path: Optional directory for cached preprocessed tensors.
+            input_image_name: Filename used for cached input tensors.
+            target_image_name: Filename used for cached target tensors.
+
+        Raises:
+            ValueError: If no manifest rows are provided.
+        """
+
         if not manifest_rows:
             raise ValueError("manifest_rows cannot be empty")
 
@@ -33,9 +47,17 @@ class CellSlicetoSliceDataset(Dataset):
         self.processing_data = None
 
     def __len__(self):
+        """Return the number of cached samples available."""
+
         return len(self.samples)
 
     def _set_metadata(self, idx: int) -> None:
+        """Populate per-sample metadata fields used by downstream components.
+
+        Args:
+            idx: Dataset index to load metadata from.
+        """
+
         sample = self.samples[idx]
 
         self.dataset_id = idx
@@ -53,6 +75,8 @@ class CellSlicetoSliceDataset(Dataset):
 
     @property
     def metadata(self):
+        """Return standardized metadata keys expected across the pipeline."""
+
         return {
             "Metadata_Plate": self.plate,
             "Metadata_Well": self.well,
@@ -65,6 +89,12 @@ class CellSlicetoSliceDataset(Dataset):
         }
 
     def process_load_images(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load raw TIFF crops and run preprocessing.
+
+        Returns:
+            Tuple of ``(input_tensor, target_tensor)``.
+        """
+
         input_image = tifffile.imread(self.input_path).astype(np.float32)
         target_image = tifffile.imread(self.target_path).astype(np.float32)
 
@@ -78,6 +108,15 @@ class CellSlicetoSliceDataset(Dataset):
         )
 
     def __getitem__(self, idx: int):
+        """Fetch one dataset sample, optionally using preprocessed tensor cache.
+
+        Args:
+            idx: Dataset index.
+
+        Returns:
+            Sample dictionary containing tensors, metadata, and source paths.
+        """
+
         self.processing_data = None
         self._set_metadata(idx=idx)
 

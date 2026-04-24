@@ -52,6 +52,17 @@ class OptimizationManager:
         model_factory: Callable[[], torch.nn.Module],
         **trainer_kwargs,
     ):
+        """Store dependencies for Optuna-driven training trials.
+
+        Args:
+            trainer: Trainer class used to run one trial.
+            hash_splitter: Callable that returns train/val/test dataloaders.
+            dataset: Dataset associated with the optimization run.
+            callbacks_args: Static callback arguments reused across trials.
+            model_factory: Callable that creates a new model instance per trial.
+            **trainer_kwargs: Shared trainer keyword arguments.
+        """
+
         self.trainer = trainer
         self.hash_splitter = hash_splitter
         self.dataset = dataset
@@ -60,6 +71,15 @@ class OptimizationManager:
         self.trainer_kwargs = trainer_kwargs
 
     def __call__(self, trial: optuna.trial.Trial):
+        """Execute one Optuna trial and return objective loss.
+
+        Args:
+            trial: Optuna trial used for hyperparameter suggestions.
+
+        Returns:
+            Best validation loss reported by the trainer.
+        """
+
         batch_size = trial.suggest_int("batch_size", 8, 32)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
 

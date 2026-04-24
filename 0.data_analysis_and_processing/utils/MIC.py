@@ -10,6 +10,13 @@ class MIC(Comparator):
     """Computes and stores group and Maximal Information Coefficient (MIC) data between paired groups"""
 
     def __init__(self, _comparison_name: str = "mic_e", _mine_params: Optional[dict[str, str]] = None):
+        """Initialize MIC comparison storage and MINE configuration.
+
+        Args:
+            _comparison_name: Output key used to store computed MIC values.
+            _mine_params: Optional keyword arguments forwarded to ``minepy.MINE``.
+        """
+
         self._comparisons = defaultdict(list)
 
         self._comparison_name = _comparison_name
@@ -33,10 +40,14 @@ class MIC(Comparator):
                     self._comparisons[f"{col}__{group_name}"].append(group)
 
     def _preprocess_data(self):
+        """Flatten grouped DataFrame rows into vectors for MINE scoring."""
+
         self._group0, self._group1 = self._group0.iloc[0].values, self._group1.iloc[0].values
 
     @property
     def comparisons(self):
+        """Return the accumulated comparison results."""
+
         return self._comparisons
 
     def __call__(self, _group0: pd.DataFrame, _group1: pd.DataFrame):

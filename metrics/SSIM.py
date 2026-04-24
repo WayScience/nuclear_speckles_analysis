@@ -14,6 +14,14 @@ class SSIM(AbstractMetric):
         use_logits: bool = False,
         device: Union[str, torch.device] = "cuda",
     ):
+        """Configure SSIM accumulation settings.
+
+        Args:
+            max_pixel_value: Peak pixel value used in SSIM constants.
+            use_logits: Whether caller should provide logits instead of postprocessed outputs.
+            device: Device for accumulation buffers.
+        """
+
         super().__init__()
         self.max_pixel_value = max_pixel_value
         self.use_logits = use_logits
@@ -23,6 +31,8 @@ class SSIM(AbstractMetric):
         self.reset()
 
     def reset(self):
+        """Reset running SSIM accumulators."""
+
         self.total_ssim = torch.tensor(0.0, device=self.device)
         self.total_samples = torch.tensor(0.0, device=self.device)
         self.data_split_logging: Optional[str] = None
@@ -34,6 +44,18 @@ class SSIM(AbstractMetric):
         data_split_logging: Optional[str] = None,
         **kwargs,
     ) -> None:
+        """Accumulate per-sample SSIM values for a split.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            data_split_logging: Split name used in final metric key.
+            **kwargs: Additional unused metric arguments.
+
+        Raises:
+            ValueError: If shapes mismatch or split name is missing.
+        """
+
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
@@ -68,6 +90,15 @@ class SSIM(AbstractMetric):
         return None
 
     def get_metric_data(self) -> dict[str, float]:
+        """Return averaged SSIM for the accumulated split and reset state.
+
+        Returns:
+            Mapping from metric name to scalar value.
+
+        Raises:
+            ValueError: If no split data has been accumulated.
+        """
+
         if self.data_split_logging is None:
             raise ValueError("No accumulated split data found for SSIM metric logging.")
 

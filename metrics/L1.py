@@ -14,6 +14,14 @@ class L1(AbstractMetric):
         use_logits: bool = False,
         device: Union[str, torch.device] = "cuda",
     ):
+        """Configure L1 behavior for optimization and/or split-level logging.
+
+        Args:
+            is_loss: Whether this instance is used directly as optimization loss.
+            use_logits: Whether caller should provide logits instead of postprocessed outputs.
+            device: Device for accumulation buffers.
+        """
+
         super().__init__()
         self.is_loss = is_loss
         self.use_logits = use_logits
@@ -23,6 +31,8 @@ class L1(AbstractMetric):
         self.reset()
 
     def reset(self):
+        """Reset running L1 accumulators used for epoch-level logging."""
+
         self.total_abs_error = torch.tensor(0.0, device=self.device)
         self.total_elements = torch.tensor(0.0, device=self.device)
         self.data_split_logging: Optional[str] = None
@@ -34,6 +44,22 @@ class L1(AbstractMetric):
         data_split_logging: Optional[str] = None,
         **kwargs,
     ) -> torch.Tensor | None:
+        """Compute batch L1 loss or accumulate split statistics.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            data_split_logging: Split name used for deferred metric logging.
+            **kwargs: Additional unused metric arguments.
+
+        Returns:
+            Mean L1 loss when used as optimization loss, else ``None``.
+
+        Raises:
+            ValueError: If prediction and target shapes differ, or split name is missing
+                for logging-only usage.
+        """
+
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
@@ -56,6 +82,15 @@ class L1(AbstractMetric):
         return None
 
     def get_metric_data(self) -> dict[str, float]:
+        """Return averaged L1 value for the accumulated split and reset state.
+
+        Returns:
+            Mapping from metric name to scalar value.
+
+        Raises:
+            ValueError: If no split data has been accumulated.
+        """
+
         if self.data_split_logging is None:
             raise ValueError("No accumulated split data found for L1 metric logging.")
 

@@ -13,6 +13,13 @@ class L2(AbstractMetric):
         use_logits: bool = False,
         device: Union[str, torch.device] = "cuda",
     ):
+        """Configure L2 (MSE) metric accumulation.
+
+        Args:
+            use_logits: Whether caller should provide logits instead of postprocessed outputs.
+            device: Device for accumulation buffers.
+        """
+
         super().__init__()
         self.use_logits = use_logits
         self.device = (
@@ -21,6 +28,8 @@ class L2(AbstractMetric):
         self.reset()
 
     def reset(self):
+        """Reset running squared-error accumulators."""
+
         self.total_squared_error = torch.tensor(0.0, device=self.device)
         self.total_elements = torch.tensor(0.0, device=self.device)
         self.data_split_logging: Optional[str] = None
@@ -32,6 +41,18 @@ class L2(AbstractMetric):
         data_split_logging: Optional[str] = None,
         **kwargs,
     ) -> None:
+        """Accumulate batch L2 statistics for split-level logging.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            data_split_logging: Split name used in final metric key.
+            **kwargs: Additional unused metric arguments.
+
+        Raises:
+            ValueError: If shapes mismatch or split name is missing.
+        """
+
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
@@ -49,6 +70,15 @@ class L2(AbstractMetric):
         return None
 
     def get_metric_data(self) -> dict[str, float]:
+        """Return averaged L2 value for the accumulated split and reset state.
+
+        Returns:
+            Mapping from metric name to scalar value.
+
+        Raises:
+            ValueError: If no split data has been accumulated.
+        """
+
         if self.data_split_logging is None:
             raise ValueError("No accumulated split data found for L2 metric logging.")
 

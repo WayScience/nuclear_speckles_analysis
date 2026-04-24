@@ -70,20 +70,14 @@ filtered_sc_figure_path.mkdir(parents=True, exist_ok=True)
 
 
 def filter_bounding_box_size(_scdf, _bounding_box_col):
-    """
-    Filter nuclei if the robust z score of a bounding box dimension is less than three.
+    """Filter nuclei by robust z-score threshold for one box-dimension column.
 
-    Parameters
-    ----------
-    _scdf: Pandas Dataframe
-        The unfiltered single-cell data containing bounding box dimensions.
+    Args:
+        _scdf: Unfiltered single-cell DataFrame containing bounding-box columns.
+        _bounding_box_col: Column name for the bounding-box dimension to filter.
 
-    _bounding_box_col: String
-        Column specifying the bounding box dimension.
-
-    Returns
-    -------
-    Filtered single-cell pandas dataframe.
+    Returns:
+        Filtered DataFrame containing rows with robust z-score < 3.
     """
 
     median = scdfs[_bounding_box_col].median()
@@ -188,4 +182,3 @@ g.ax_joint.legend(fontsize=12)
 
 plt.savefig(filtered_sc_figure_path / "nuclei_dimension_distributions.png")
 plt.show()
-

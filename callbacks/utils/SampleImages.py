@@ -16,6 +16,14 @@ class SampleImages:
         image_fraction: float,
         dataset_idxs: Optional[list[int]] = None,
     ) -> None:
+        """Configure deterministic sample selection from a dataset or dataloader.
+
+        Args:
+            datastruct: Dataset or dataloader to sample from.
+            image_fraction: Fraction of samples to keep via hash thresholding.
+            dataset_idxs: Optional subset indices when ``datastruct`` is a dataset.
+        """
+
         self.is_dataset = dataset_idxs is not None
         self.datastruct = datastruct
         self.dataset_idxs = dataset_idxs
@@ -50,6 +58,15 @@ class SampleImages:
         return metadata_dataset_id
 
     def __call__(self) -> list[int]:
+        """Collect dataset indices selected by hash-based sampling.
+
+        Returns:
+            List of selected dataset indices.
+
+        Raises:
+            ValueError: If no samples satisfy the requested sampling fraction.
+        """
+
         image_dataset_idxs = []
 
         data_iterable = (

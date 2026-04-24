@@ -25,6 +25,22 @@ class UNetTrainer:
         use_amp: bool = True,
         max_train_batches: int | None = None,
     ) -> None:
+        """Initialize trainer state and optional AMP scaler.
+
+        Args:
+            model: Trainable image-to-image model.
+            model_optimizer: Optimizer used for parameter updates.
+            model_loss: Loss module used for backpropagation.
+            train_dataloader: Training dataloader.
+            val_dataloader: Validation dataloader used by callbacks.
+            callbacks: Callback dispatcher used for hooks and logging.
+            image_postprocessor: Postprocessor applied to model outputs.
+            epochs: Maximum number of training epochs.
+            device: Target device for model and tensors.
+            use_amp: Whether to use automatic mixed precision.
+            max_train_batches: Optional cap on train batches per epoch.
+        """
+
         self.model = model
         self.model_optimizer = model_optimizer
         self.model_loss = model_loss
@@ -49,9 +65,13 @@ class UNetTrainer:
 
     @property
     def best_loss_value(self):
+        """Expose best validation loss tracked by callbacks."""
+
         return self.callbacks.best_loss_value
 
     def train(self) -> None:
+        """Run the training loop with callback hooks and optional early stopping."""
+
         train_data = {}
         train_data["continue_training"] = True
         train_data["device"] = self.device
@@ -121,4 +141,6 @@ class UNetTrainer:
                 break
 
     def __call__(self) -> None:
+        """Execute training when the trainer is called like a function."""
+
         self.train()

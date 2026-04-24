@@ -25,6 +25,21 @@ class Callbacks:
         batch_log_every_n: int = 50,
         max_eval_batches: int | None = None,
     ):
+        """Initialize callback dependencies and training-state trackers.
+
+        Args:
+            metrics: Metrics updated during epoch-end evaluation.
+            loss: Loss object used for optimization and logging.
+            early_stopping_counter_threshold: Number of non-improving epochs before stop.
+            image_savers: Optional saver callable or list of saver callables.
+            image_postprocessor: Postprocessor applied before metric logging when needed.
+            batch_log_every_n: Batch interval for progress logging.
+            max_eval_batches: Optional cap on validation/train batches during evaluation.
+
+        Raises:
+            ValueError: If ``batch_log_every_n`` is not positive.
+        """
+
         self.metrics = metrics
         self.loss = loss
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
@@ -74,6 +89,17 @@ class Callbacks:
         device: Union[str, torch.device] = "cuda",
         **kwargs,
     ) -> None:
+        """Run one evaluation pass and log aggregated loss/metric values.
+
+        Args:
+            time_step: Epoch index used for MLflow metric steps.
+            model: Model evaluated on the provided dataloader.
+            dataloader: Data split loader to iterate.
+            data_split: Logging prefix (for example ``train`` or ``validation``).
+            device: Kept for API consistency with callback hook signatures.
+            **kwargs: Additional unused callback arguments.
+        """
+
         model.eval()
 
         with torch.no_grad():
@@ -120,6 +146,18 @@ class Callbacks:
     def _assess_early_stopping(
         self, epoch: int, signature: ModelSignature, model: Module, **kwargs
     ) -> bool:
+        """Update early-stopping state and persist the best model.
+
+        Args:
+            epoch: Current epoch index.
+            signature: MLflow model signature inferred from validation samples.
+            model: Model to log when loss improves.
+            **kwargs: Additional unused callback arguments.
+
+        Returns:
+            ``True`` when training should continue, otherwise ``False``.
+        """
+
         if self.best_loss_value > self.loss_value:
             self.best_loss_value = self.loss_value
             self.early_stopping_counter = 0
@@ -156,9 +194,13 @@ class Callbacks:
         return infer_signature(input_numpy, output_example)
 
     def _on_epoch_start(self, epoch: int, **kwargs) -> None:
+        """Print a progress message when an epoch begins."""
+
         print(f"Starting epoch {epoch}")
 
     def _on_batch_start(self, batch: int, **kwargs) -> None:
+        """Print a progress message at configured batch intervals."""
+
         if batch % self.batch_log_every_n == 0:
             print(f"Starting batch {batch}")
 
@@ -206,6 +248,8 @@ class Callbacks:
         )
 
     def _on_batch_end(self, batch: int, **kwargs) -> None:
+        """No-op hook reserved for end-of-batch extensions."""
+
         pass
 
     def __call__(self, callback_hook: str, **kwargs) -> None:

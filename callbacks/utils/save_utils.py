@@ -12,6 +12,13 @@ def save_image_mlflow(
     save_image_path_folder: str,
     image_filename: str,
 ) -> None:
+    """Write an image to a temporary TIFF and upload it to MLflow.
+
+    Args:
+        image: Image array to save.
+        save_image_path_folder: MLflow artifact folder path.
+        image_filename: Artifact filename.
+    """
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         save_path = pathlib.Path(tmp_dir) / image_filename
@@ -25,6 +32,13 @@ def save_image_locally(
     save_image_path_folder: str,
     image_filename: str,
 ) -> None:
+    """Write an image to a local output directory as uint8 TIFF.
+
+    Args:
+        image: Image array to save.
+        save_image_path_folder: Output directory path.
+        image_filename: Output filename.
+    """
 
     save_image_path_folder = pathlib.Path(save_image_path_folder)
     save_image_path_folder.mkdir(parents=True, exist_ok=True)

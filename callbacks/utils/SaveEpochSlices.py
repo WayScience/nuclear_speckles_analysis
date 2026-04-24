@@ -16,6 +16,14 @@ class SaveEpochSlices:
         image_postprocessor: Any = lambda x: x,
         image_dataset_idxs: Optional[list[int]] = None,
     ) -> None:
+        """Initialize epoch-wise crop saving configuration.
+
+        Args:
+            image_dataset: Dataset used to fetch fixed samples for visualization.
+            image_postprocessor: Transform applied to model predictions before saving.
+            image_dataset_idxs: Optional dataset indices to save each epoch.
+        """
+
         self.image_dataset = image_dataset
         self.image_postprocessor = image_postprocessor
         self.image_dataset_idxs = (
@@ -30,6 +38,17 @@ class SaveEpochSlices:
         image_type: str,
         image: torch.Tensor,
     ) -> None:
+        """Convert a tensor image to uint8 and log it as an MLflow artifact.
+
+        Args:
+            image_path: Source path used to derive filename metadata.
+            image_type: Prefix describing the image role (input/target/prediction).
+            image: Image tensor with shape ``(H, W)`` or ``(1, H, W)``.
+
+        Raises:
+            ValueError: If image is not convertible to a single 2D slice.
+        """
+
         if image.ndim == 3 and image.shape[0] == 1:
             image = image[0]
 
@@ -60,11 +79,28 @@ class SaveEpochSlices:
         )
 
     def predict_target(self, image: torch.Tensor, model: torch.nn.Module) -> torch.Tensor:
+        """Run model inference for one sample and apply postprocessing.
+
+        Args:
+            image: Input sample tensor with channel-first layout.
+            model: Trained model used for prediction.
+
+        Returns:
+            Postprocessed prediction tensor.
+        """
+
         with torch.no_grad():
             prediction = model(image.unsqueeze(0)).squeeze(0)
         return self.image_postprocessor(prediction)
 
     def __call__(self, model: torch.nn.Module, epoch: int) -> None:
+        """Save input, target, and generated prediction images for one epoch.
+
+        Args:
+            model: Model used to generate predictions.
+            epoch: Current epoch index used in artifact paths.
+        """
+
         self.epoch = epoch
         for sample_idx in self.image_dataset_idxs:
             sample = self.image_dataset[sample_idx]
