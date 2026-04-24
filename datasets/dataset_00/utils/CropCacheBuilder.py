@@ -42,11 +42,11 @@ def _parse_image_filename(filename: str) -> tuple[str, str, str, str]:
     return parts[0], parts[1], parts[2], parts[3]
 
 
-def _build_ic_corrected_image_index(original_img_dir: pathlib.Path) -> dict[tuple[str, str, str], dict[str, pathlib.Path]]:
-    """Index IC-corrected images by (plate, well, site) and channel.
+def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], dict[str, pathlib.Path]]:
+    """Index source images by (plate, well, site) and channel.
 
     Args:
-        original_img_dir: Root directory containing IC-corrected TIFF images.
+        image_dir: Root directory containing TIFF images.
 
     Returns:
         Nested mapping keyed by (plate, well, site) and then channel name.
@@ -54,7 +54,7 @@ def _build_ic_corrected_image_index(original_img_dir: pathlib.Path) -> dict[tupl
 
     image_index: dict[tuple[str, str, str], dict[str, pathlib.Path]] = {}
 
-    for image_path in sorted(original_img_dir.glob("**/*.tiff")):
+    for image_path in sorted(image_dir.glob("**/*.tiff")):
         plate, well, site, channel = _parse_image_filename(image_path.name)
         key = (plate, well, site)
         if key not in image_index:
@@ -304,9 +304,9 @@ def ensure_dapi_to_gold_cache(
     rows: list[dict[str, str]] = []
 
     nuclear_mask_dir = (data_dir / "Nuclear_masks").resolve(strict=True)
-    original_img_dir = (data_dir / "IC_corrected_images").resolve(strict=True)
+    image_dir = (data_dir / "IC_corrected_images").resolve(strict=True)
 
-    image_index = _build_ic_corrected_image_index(original_img_dir=original_img_dir)
+    image_index = _build_image_index(image_dir=image_dir)
 
     dapi_mask_paths = sorted(nuclear_mask_dir.glob("**/*CH0*.tiff"))
 
