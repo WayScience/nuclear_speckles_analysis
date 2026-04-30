@@ -92,35 +92,46 @@ def _filter_bounding_box_size(scdf: pd.DataFrame, bounding_box_col: str) -> pd.D
     return scdf.loc[robust_z < 3].copy()
 
 
-def _add_padding(image: np.ndarray, target_width: int, target_height: int) -> np.ndarray:
-    """Pad a 2D crop to the target size with centered zero padding.
+def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: int) -> tuple[int, int]:
+    """Compute a fixed-size crop window and shift it inside image bounds.
+
+    The window is centered on the provided [start, end) interval midpoint.
+    If the window would extend outside the field of view, it is translated so
+    it fits within [0, axis_limit) instead of introducing zero padding.
 
     Args:
-        image: Input crop image.
-        target_width: Desired output width.
-        target_height: Desired output height.
+        start: Bounding-box minimum coordinate (inclusive).
+        end: Bounding-box maximum coordinate (exclusive).
+        target_size: Desired crop size along this axis.
+        axis_limit: Full image size along this axis.
 
     Returns:
-        Padded image with shape (target_height, target_width).
-
-    Raises:
-        ValueError: If target size is smaller than the input crop.
+        Tuple of (window_start, window_end), where window_end is exclusive.
     """
 
-    height, width = image.shape[:2]
-    # Split extra pixels across both sides to keep the crop centered.
-    top = (target_height - height) // 2
-    bottom = target_height - height - top
-    left = (target_width - width) // 2
-    right = target_width - width - left
+    if axis_limit <= 0:
+        return 0, 0
 
-    if min(top, bottom, left, right) < 0:
-        raise ValueError("Target crop shape is smaller than a nucleus crop.")
+    if target_size >= axis_limit:
+        return 0, axis_limit
 
-    if top == 0 and bottom == 0 and left == 0 and right == 0:
-        return image
+    center = (start + end) / 2.0
+    window_start = int(round(center - target_size / 2.0))
+    window_end = window_start + target_size
 
-    return np.pad(image, ((top, bottom), (left, right)), mode="constant", constant_values=0)
+    if window_start < 0:
+        window_end -= window_start
+        window_start = 0
+
+    if window_end > axis_limit:
+        shift = window_end - axis_limit
+        window_start -= shift
+        window_end = axis_limit
+
+    if window_start < 0:
+        window_start = 0
+
+    return window_start, window_end
 
 
 def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
@@ -373,24 +384,32 @@ def ensure_dapi_to_gold_cache(
             x1 = int(nucleus["Nuclei_AreaShape_BoundingBoxMaximum_X"])
             y1 = int(nucleus["Nuclei_AreaShape_BoundingBoxMaximum_Y"])
 
-            cropped_dapi = dapi_img[y0:y1, x0:x1].copy()
-            cropped_mask = dapi_mask[y0:y1, x0:x1]
-            cropped_gold = gold_img[y0:y1, x0:x1].copy()
+            crop_x0, crop_x1 = _compute_shifted_window(
+                start=x0,
+                end=x1,
+                target_size=target_width,
+                axis_limit=dapi_img.shape[1],
+            )
+            crop_y0, crop_y1 = _compute_shifted_window(
+                start=y0,
+                end=y1,
+                target_size=target_height,
+                axis_limit=dapi_img.shape[0],
+            )
+
+            cropped_dapi = dapi_img[crop_y0:crop_y1, crop_x0:crop_x1].copy()
+            cropped_mask = dapi_mask[crop_y0:crop_y1, crop_x0:crop_x1]
+            cropped_gold = gold_img[crop_y0:crop_y1, crop_x0:crop_x1].copy()
 
             if cropped_dapi.size == 0 or cropped_gold.size == 0:
                 continue
 
-            # Skip empty-signal crops before and after mask application.
+            # Skip empty-signal crops.
             if cropped_dapi.max() == 0 or cropped_gold.max() == 0:
                 continue
 
-            cropped_dapi[cropped_mask == 0] = 0
-            cropped_gold[cropped_mask == 0] = 0
-
-            padded_dapi = _add_padding(cropped_dapi, target_width=target_width, target_height=target_height)
-            padded_gold = _add_padding(cropped_gold, target_width=target_width, target_height=target_height)
-
-            if padded_dapi.max() == 0 or padded_gold.max() == 0:
+            # Keep raw background intensity values; do not zero outside mask.
+            if cropped_mask.size == 0:
                 continue
 
             center_x = (x0 + x1) / 2
@@ -408,9 +427,9 @@ def ensure_dapi_to_gold_cache(
             target_path = sample_dir / "gold_cropped_image.tiff"
 
             if not input_path.exists():
-                tifffile.imwrite(input_path, padded_dapi)
+                tifffile.imwrite(input_path, cropped_dapi)
             if not target_path.exists():
-                tifffile.imwrite(target_path, padded_gold)
+                tifffile.imwrite(target_path, cropped_gold)
 
             rows.append(
                 {
