@@ -40,6 +40,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         val_dataloader = hook_data["val_dataloader"]
         loss_value = hook_data["loss_value"]
 
+        # Reuse one validation sample to keep model signature logging lightweight.
         val_sample = next(iter(val_dataloader))
         signature = self._prepare_signature(input_example=val_sample["input"], model=model)
 

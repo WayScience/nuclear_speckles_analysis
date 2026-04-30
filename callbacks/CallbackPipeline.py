@@ -75,10 +75,13 @@ class CallbackPipeline:
 
         self.composer = CallbackComposer(
             callbacks=[
+                # Keep evaluation before logging so aggregate values are current.
                 self.progress,
                 self.evaluator,
                 self.metrics_logger,
+                # Image saving uses epoch/model but is independent of loss updates.
                 self.image_saver,
+                # Early stopping runs last because it consumes logged loss_value.
                 self.early_stopping,
             ]
         )
