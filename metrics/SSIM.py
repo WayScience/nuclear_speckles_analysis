@@ -107,6 +107,9 @@ class SSIM(AbstractMetric):
             self.total_ssim / self.total_samples,
             torch.tensor(0.0, device=self.device),
         )
+        if not torch.isfinite(average_ssim):
+            average_ssim = torch.tensor(0.0, device=self.device)
+
         metric_data = {f"ssim_total_{self.data_split_logging}": average_ssim.item()}
         self.reset()
         return metric_data

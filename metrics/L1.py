@@ -99,6 +99,8 @@ class L1(AbstractMetric):
             self.total_abs_error / self.total_elements,
             torch.tensor(0.0, device=self.device),
         )
+        if not torch.isfinite(average_l1):
+            average_l1 = torch.tensor(0.0, device=self.device)
 
         if self.is_loss:
             metric_key = f"l1_total_loss_{self.data_split_logging}"

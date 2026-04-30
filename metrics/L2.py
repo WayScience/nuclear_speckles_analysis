@@ -87,6 +87,9 @@ class L2(AbstractMetric):
             self.total_squared_error / self.total_elements,
             torch.tensor(0.0, device=self.device),
         )
+        if not torch.isfinite(average_l2):
+            average_l2 = torch.tensor(0.0, device=self.device)
+
         metric_data = {f"l2_total_{self.data_split_logging}": average_l2.item()}
         self.reset()
         return metric_data
