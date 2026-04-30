@@ -22,6 +22,7 @@ dependencies = [
     "tifffile>=2025.10.16",
     "torch>=2.9.0",
     "torchvision>=0.24.0",
+    "torchmetrics>=1.9.0",
 ]
 
 [build-system]
