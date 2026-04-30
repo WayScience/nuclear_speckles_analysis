@@ -29,14 +29,14 @@ class SaveEpochCrops:
         self.image_dataset_idxs = (
             range(len(image_dataset)) if image_dataset_idxs is None else image_dataset_idxs
         )
-        self.epoch = None
-        self.metadata = None
 
     def save_image(
         self,
         image_path: pathlib.Path,
         image_type: str,
         image: torch.Tensor,
+        metadata: dict[str, Any],
+        epoch: int,
     ) -> None:
         """Convert a tensor image to uint8 and log it as an MLflow artifact.
 
@@ -44,6 +44,8 @@ class SaveEpochCrops:
             image_path: Source path used to derive filename metadata.
             image_type: Prefix describing the image role (input/target/prediction).
             image: Image tensor with shape ``(H, W)`` or ``(1, H, W)``.
+            metadata: Per-image metadata used for artifact path construction.
+            epoch: Current epoch index used in artifact paths.
 
         Raises:
             ValueError: If image is not convertible to a single 2D crop.
@@ -61,14 +63,14 @@ class SaveEpochCrops:
         if np.max(image_np) == 0:
             return
 
-        plate = self.metadata["Metadata_Plate"]
-        well = self.metadata["Metadata_Well"]
-        site = self.metadata["Metadata_Site"]
-        sample_id = self.metadata["Metadata_Sample_ID"]
+        plate = metadata["Metadata_Plate"]
+        well = metadata["Metadata_Well"]
+        site = metadata["Metadata_Site"]
+        sample_id = metadata["Metadata_Sample_ID"]
 
         image_suffix = ".tiff" if ".tif" in image_path.suffix else image_path.suffix
         save_image_path_folder = (
-            f"cropped_images/epoch_{self.epoch:02}/{plate}/{well}_{site}/{sample_id}"
+            f"cropped_images/epoch_{epoch:02}/{plate}/{well}_{site}/{sample_id}"
         )
         image_filename = f"{image_type}_{image_path.stem}{image_suffix}"
 
@@ -101,21 +103,24 @@ class SaveEpochCrops:
             epoch: Current epoch index used in artifact paths.
         """
 
-        self.epoch = epoch
         for sample_idx in self.image_dataset_idxs:
             sample = self.image_dataset[sample_idx]
-            self.metadata = sample["metadata"]
+            metadata = sample["metadata"]
 
             self.save_image(
                 image_path=sample["input_path"],
                 image_type="input",
                 image=sample["input"],
+                metadata=metadata,
+                epoch=epoch,
             )
 
             self.save_image(
                 image_path=sample["target_path"],
                 image_type="target",
                 image=sample["target"],
+                metadata=metadata,
+                epoch=epoch,
             )
 
             generated_prediction = self.predict_target(image=sample["input"], model=model)
@@ -123,4 +128,6 @@ class SaveEpochCrops:
                 image_path=sample["target_path"],
                 image_type="generated_prediction",
                 image=generated_prediction,
+                metadata=metadata,
+                epoch=epoch,
             )
