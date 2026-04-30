@@ -21,8 +21,8 @@ class CallbackComposer:
             getattr(callback, callback_hook)(context)
 
 
-class Callbacks:
-    """Public callback entrypoint compatible with trainer usage."""
+class CallbackPipeline:
+    """Compose lifecycle callbacks behind a single trainer-facing object."""
 
     def __init__(
         self,

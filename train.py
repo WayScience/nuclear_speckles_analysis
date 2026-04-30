@@ -9,7 +9,7 @@ import numpy as np
 import optuna
 import torch
 
-from callbacks.Callbacks import Callbacks
+from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
@@ -114,7 +114,7 @@ class OptimizationManager:
             mlflow.log_param("batch_size", batch_size)
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
-            self.trainer_kwargs["callbacks"] = Callbacks(
+            self.trainer_kwargs["callbacks"] = CallbackPipeline(
                 **self.callbacks_args | {"metrics": metrics, "loss": loss_callbacks}
             )
 
