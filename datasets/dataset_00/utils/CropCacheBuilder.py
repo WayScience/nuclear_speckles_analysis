@@ -65,7 +65,13 @@ def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], di
 
 
 def _filter_bounding_box_size(scdf: pd.DataFrame, bounding_box_col: str) -> pd.DataFrame:
-    """Remove extreme bounding-box outliers using median absolute deviation.
+    """Filter implausible single-cell bounding-box sizes using MAD.
+
+    Single-cell crops are generated directly from CellProfiler nuclei bounding
+    boxes. Occasional segmentation artifacts (e.g., merged objects or bad masks)
+    produce extreme width/height values that lead to unusable crops and noisy
+    cache entries. This filter removes those size outliers per axis before crop
+    caching, using a robust median absolute deviation (MAD) threshold.
 
     Args:
         scdf: Single-cell profile rows.
@@ -173,6 +179,7 @@ def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
         scdf["Nuclei_AreaShape_BoundingBoxMaximum_Y"] - scdf["Nuclei_AreaShape_BoundingBoxMinimum_Y"]
     )
 
+    # Filter bbox width/height outliers before generating fixed-size crops.
     scdf = _filter_bounding_box_size(scdf=scdf, bounding_box_col="Nuclei_AreaShape_BoundingBoxDelta_X")
     scdf = _filter_bounding_box_size(scdf=scdf, bounding_box_col="Nuclei_AreaShape_BoundingBoxDelta_Y")
 
