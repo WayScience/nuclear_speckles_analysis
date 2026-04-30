@@ -1,6 +1,7 @@
 from typing import Union
 
 import torch
+from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 from .AbstractMetric import AbstractMetric
 
@@ -28,13 +29,16 @@ class SSIM(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
+        self.ssim_metric = StructuralSimilarityIndexMeasure(
+            data_range=max_pixel_value,
+            reduction="elementwise_mean",
+        ).to(self.device)
         self.reset()
 
     def reset(self):
         """Reset running SSIM accumulators."""
 
-        self.total_ssim = torch.tensor(0.0, device=self.device)
-        self.total_samples = torch.tensor(0.0, device=self.device)
+        self.ssim_metric.reset()
 
     def forward(
         self,
@@ -56,29 +60,7 @@ class SSIM(AbstractMetric):
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
-        mu_x = generated_predictions.mean(dim=(2, 3), keepdim=True)
-        mu_y = targets.mean(dim=(2, 3), keepdim=True)
-
-        sigma_x = ((generated_predictions - mu_x) ** 2).mean(dim=(2, 3), keepdim=True)
-        sigma_y = ((targets - mu_y) ** 2).mean(dim=(2, 3), keepdim=True)
-        sigma_xy = ((generated_predictions - mu_x) * (targets - mu_y)).mean(
-            dim=(2, 3), keepdim=True
-        )
-
-        c1 = (0.01 * self.max_pixel_value) ** 2
-        c2 = (0.03 * self.max_pixel_value) ** 2
-
-        ssim_map = ((2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)) / (
-            (mu_x**2 + mu_y**2 + c1) * (sigma_x + sigma_y + c2)
-        )
-
-        batch_ssim = ssim_map.mean(dim=(1, 2, 3))
-        self.total_ssim += batch_ssim.sum().detach().to(self.device)
-        self.total_samples += torch.tensor(
-            batch_ssim.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.ssim_metric.update(generated_predictions, targets)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -93,11 +75,7 @@ class SSIM(AbstractMetric):
             Scalar tensor with current SSIM value.
         """
 
-        average_ssim = torch.where(
-            self.total_samples > 0,
-            self.total_ssim / self.total_samples,
-            torch.tensor(0.0, device=self.device),
-        )
+        average_ssim = self.ssim_metric.compute().to(self.device)
         if not torch.isfinite(average_ssim):
             average_ssim = torch.tensor(0.0, device=self.device)
         return average_ssim
