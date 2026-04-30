@@ -22,19 +22,30 @@ class SampleImages:
             datastruct: Dataset or dataloader to sample from.
             image_fraction: Fraction of samples to keep via hash thresholding.
             dataset_idxs: Optional subset indices when ``datastruct`` is a dataset.
+
+        Raises:
+            ValueError: If ``dataset_idxs`` is provided when ``datastruct`` is a dataloader.
+            TypeError: If ``datastruct`` is not a dataset or dataloader.
         """
 
-        self.is_dataset = dataset_idxs is not None
         self.datastruct = datastruct
         self.dataset_idxs = dataset_idxs
         self.divisor = 10**6
 
-        if self.is_dataset:
-            self.original_data_split = self.datastruct.split_data
-            self.datastruct.split_data = True
+        if isinstance(datastruct, Dataset):
+            self.is_dataset = True
+            self.base_dataset = datastruct
+        elif isinstance(datastruct, DataLoader):
+            self.is_dataset = False
+            self.base_dataset = datastruct.dataset.dataset
+            if dataset_idxs is not None:
+                raise ValueError(
+                    "dataset_idxs is only supported when datastruct is a Dataset"
+                )
         else:
-            self.original_data_split = self.datastruct.dataset.dataset.split_data
-            self.datastruct.dataset.dataset.split_data = True
+            raise TypeError(
+                f"datastruct must be Dataset or DataLoader, got {type(datastruct).__name__}"
+            )
 
         image_fraction = min(1.0, image_fraction)
 
@@ -43,8 +54,14 @@ class SampleImages:
     def sample_images(
         self, metadata_dataset_id: int, metadata_sample_id: Optional[str]
     ) -> Optional[int]:
-        """
-        Hash-based sampling using sample ids.
+        """Select a dataset index based on hash-thresholded sample ID.
+
+        Args:
+            metadata_dataset_id: Dataset index associated with one sample.
+            metadata_sample_id: Sample identifier used for hash-based selection.
+
+        Returns:
+            The dataset index when selected, otherwise ``None``.
         """
 
         if metadata_sample_id is None:
@@ -64,42 +81,41 @@ class SampleImages:
             List of selected dataset indices.
 
         Raises:
-            ValueError: If no samples satisfy the requested sampling fraction.
+            ValueError: If no samples satisfy the sampling fraction.
         """
 
         image_dataset_idxs = []
+        original_data_split = self.base_dataset.split_data
+        self.base_dataset.split_data = True
+        try:
+            data_iterable = (
+                (self.datastruct[idx] for idx in self.dataset_idxs)
+                if self.is_dataset and self.dataset_idxs is not None
+                else self.datastruct
+            )
 
-        data_iterable = (
-            (self.datastruct[idx] for idx in self.dataset_idxs)
-            if self.is_dataset
-            else self.datastruct
-        )
+            for data in data_iterable:
+                metadata = data["metadata"]
+                dataset_ids = metadata["Metadata_Dataset_ID"]
+                sample_ids = metadata["Metadata_Sample_ID"]
 
-        for data in data_iterable:
-            metadata = data["metadata"]
-            dataset_ids = metadata["Metadata_Dataset_ID"]
-            sample_ids = metadata["Metadata_Sample_ID"]
+                dataset_sample_pairs = (
+                    [(dataset_ids, sample_ids)]
+                    if self.is_dataset
+                    else zip(dataset_ids, sample_ids)
+                )
 
-            if self.is_dataset:
-                dataset_sample_pairs = [(dataset_ids, sample_ids)]
+                for dataset_id, sample_id in dataset_sample_pairs:
+                    image_dataset_idx = self.sample_images(dataset_id, sample_id)
 
-            else:
-                dataset_sample_pairs = zip(dataset_ids, sample_ids)
-
-            for dataset_id, sample_id in dataset_sample_pairs:
-                image_dataset_idx = self.sample_images(dataset_id, sample_id)
-
-                if image_dataset_idx is not None:
-                    image_dataset_idxs.append(image_dataset_idx)
+                    if image_dataset_idx is not None:
+                        image_dataset_idxs.append(image_dataset_idx)
+        finally:
+            self.base_dataset.split_data = original_data_split
 
         if not image_dataset_idxs:
             raise ValueError(
                 "No images were sampled. Consider changing your thresholds and ensuring there is enough data in the dataloader."
             )
-
-        if self.is_dataset:
-            self.datastruct.split_data = self.original_data_split
-        else:
-            self.datastruct.dataset.dataset.split_data = self.original_data_split
 
         return image_dataset_idxs
