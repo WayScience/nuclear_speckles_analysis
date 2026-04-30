@@ -89,9 +89,23 @@ class PairwiseCompare:
         self.__antehoc_group_names = [f"antehoc{suffix}" for suffix in group_suffixes]
 
     def __warn_empty_comparisons(self, _comparison_type_name):
+        """Emit a warning when a comparison mode yields no valid pairs.
+
+        Args:
+            _comparison_type_name: Human-readable name of the comparison stage.
+        """
+
         warnings.warn(f"{_comparison_type_name} were empty", UserWarning)
 
     def __is_iterable_with_strings(self, _data_structure):
+        """Validate that input is an iterable containing only string values.
+
+        Args:
+            _data_structure: Candidate iterable to validate.
+
+        Raises:
+            TypeError: If input is a string, non-iterable, or contains non-strings.
+        """
 
         prefix_msg = "Expected an Iterable of Strings."
 

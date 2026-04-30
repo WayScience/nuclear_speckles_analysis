@@ -3,6 +3,22 @@ models*
 
 # Ignore data splits due to large size
 data*
+!datasets/
+!datasets/**
 
 # Ignore single-cell crops
 sc_crops*
+
+# Ignore local agent instructions
+AGENTS.md
+
+# Local training/runtime artifacts
+cached_nuclear_speckles_data/
+nuclear_speckles_data/
+mlartifacts/
+mlflow.db
+optuna_study.joblib
+train_repl.py
+
+# Python bytecode caches
+__pycache__/
