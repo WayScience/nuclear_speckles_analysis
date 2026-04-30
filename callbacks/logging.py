@@ -29,22 +29,12 @@ class MetricsMlflowLoggerCallback(BaseCallback):
         """
 
         time_step = hook_data["epoch"]
+        epoch_metric_data = hook_data["epoch_metric_data"]
 
-        loss_value = None
-        for name, current_value in self.loss.get_metric_data().items():
-            # Early stopping expects a single primary loss value.
-            if "loss" in name and "component" not in name:
-                loss_value = current_value
+        for name, metric_value in epoch_metric_data.items():
+            mlflow.log_metric(name, metric_value, step=time_step)
 
-            mlflow.log_metric(name, current_value, step=time_step)
-
-        if loss_value is None:
-            raise ValueError(
-                "The loss name should contain the string 'loss' and shouldn't contain the string 'component'"
-            )
-
-        hook_data["loss_value"] = loss_value
-
-        for metric in self.metrics:
-            for name, metric_value in metric.get_metric_data().items():
-                mlflow.log_metric(name, metric_value, step=time_step)
+        validation_loss_key = f"{self.loss.metric_name}_validation"
+        if validation_loss_key not in epoch_metric_data:
+            raise ValueError(f"Missing expected validation loss key: {validation_loss_key}")
+        hook_data["loss_value"] = epoch_metric_data[validation_loss_key]

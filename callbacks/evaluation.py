@@ -39,18 +39,24 @@ class EpochEvaluatorCallback(BaseCallback):
         """
 
         model = hook_data["model"]
+        epoch_metric_data: dict[str, float] = {}
         for data_split, dataloader in [
             ("train", hook_data["train_dataloader"]),
             ("validation", hook_data["val_dataloader"]),
         ]:
-            self._evaluate_split(model=model, dataloader=dataloader, data_split=data_split)
+            split_metric_data = self._evaluate_split(
+                model=model, dataloader=dataloader, data_split=data_split
+            )
+            epoch_metric_data.update(split_metric_data)
+
+        hook_data["epoch_metric_data"] = epoch_metric_data
 
     def _evaluate_split(
         self,
         model: Module,
         dataloader: DataLoader,
         data_split: str,
-    ) -> None:
+    ) -> dict[str, float]:
         """Evaluate one split and update running metric/loss accumulators.
 
         Args:
@@ -79,19 +85,17 @@ class EpochEvaluatorCallback(BaseCallback):
                         else sigmoid_generated_predictions
                     ),
                     targets=samples["target"],
-                    data_split_logging=data_split,
                     loss_mask=samples.get("loss_mask"),
                 )
 
                 for metric in self.metrics:
-                    metric(
+                    metric.update(
                         generated_predictions=(
                             generated_predictions
                             if metric.use_logits
                             else sigmoid_generated_predictions
                         ),
                         targets=samples["target"],
-                        data_split_logging=data_split,
                         loss_mask=samples.get("loss_mask"),
                     )
 
@@ -100,3 +104,13 @@ class EpochEvaluatorCallback(BaseCallback):
                     and (batch_idx + 1) >= self.max_eval_batches
                 ):
                     break
+
+        split_metric_data = {
+            f"{self.loss.metric_name}_{data_split}": self.loss.compute().item(),
+        }
+        self.loss.reset()
+        for metric in self.metrics:
+            split_metric_data[f"{metric.metric_name}_{data_split}"] = metric.compute().item()
+            metric.reset()
+
+        return split_metric_data
