@@ -1,19 +1,28 @@
 from typing import Any, List, Optional, Union
 
-import mlflow
-import torch
-from mlflow.models import ModelSignature
-from mlflow.models.signature import infer_signature
-from torch.amp import autocast
 from torch.nn import Module
-from torch.utils.data import DataLoader
+
+from callbacks.base import Callback
+from callbacks.early_stopping import EarlyStoppingAndCheckpointCallback
+from callbacks.evaluation import EpochEvaluatorCallback
+from callbacks.image_saving import ImageSaverCallback
+from callbacks.logging import MetricsMlflowLoggerCallback
+from callbacks.progress import ProgressLoggerCallback
+
+
+class CallbackComposer:
+    """Execute callback hooks in registration order."""
+
+    def __init__(self, callbacks: list[Callback]) -> None:
+        self.callbacks = callbacks
+
+    def trigger(self, callback_hook: str, context: dict[str, Any]) -> None:
+        for callback in self.callbacks:
+            getattr(callback, callback_hook)(context)
 
 
 class Callbacks:
-    """
-    Triggered at certain points during model training according to the callback hook.
-    Most of the logic is implemented in the _on_epoch_end function. Please see this function for more details.
-    """
+    """Public callback entrypoint compatible with trainer usage."""
 
     def __init__(
         self,
@@ -24,236 +33,37 @@ class Callbacks:
         image_postprocessor: Any = lambda x: x,
         batch_log_every_n: int = 50,
         max_eval_batches: int | None = None,
-    ):
-        """Initialize callback dependencies and training-state trackers.
-
-        Args:
-            metrics: Metrics updated during epoch-end evaluation.
-            loss: Loss object used for optimization and logging.
-            early_stopping_counter_threshold: Number of non-improving epochs before stop.
-            image_savers: Optional saver callable or list of saver callables.
-            image_postprocessor: Postprocessor applied before metric logging when needed.
-            batch_log_every_n: Batch interval for progress logging.
-            max_eval_batches: Optional cap on validation/train batches during evaluation.
-
-        Raises:
-            ValueError: If ``batch_log_every_n`` is not positive.
-        """
-
-        self.metrics = metrics
-        self.loss = loss
-        self.early_stopping_counter_threshold = early_stopping_counter_threshold
-        self.image_savers = image_savers
-        self.image_postprocessor = image_postprocessor
-        if batch_log_every_n <= 0:
-            raise ValueError("batch_log_every_n must be a positive integer")
-        self.batch_log_every_n = batch_log_every_n
-        self.max_eval_batches = max_eval_batches
-        self.best_loss_value = float("inf")  # We always want to minimize the loss
-        self.early_stopping_counter = 0
-        self.loss_value = None
-
-        if any(not metric.use_logits for metric in [*metrics, loss]):
-            self.compute_sigmoid = True
-
-        else:
-            self.compute_sigmoid = False
-
-    def _log_metrics(self, time_step: int):
-        """
-        Log metrics at an predefined time step (including components of metrics)
-        """
-
-        for name, loss_value in self.loss.get_metric_data().items():
-            # Stores the loss value to assess if training should stop early
-            if "loss" in name and "component" not in name:
-                self.loss_value = loss_value
-
-            mlflow.log_metric(name, loss_value, step=time_step)
-
-        if self.loss_value is None:
-            raise ValueError(
-                "The loss name should contain the string 'loss' and shouldn't contain the string 'component'"
-            )
-
-        for metric in self.metrics:
-            for name, metric_value in metric.get_metric_data().items():
-                mlflow.log_metric(name, metric_value, step=time_step)
-
-    def _log_epoch_metrics(
-        self,
-        time_step: int,
-        model: Module,
-        dataloader: DataLoader,
-        data_split: str,
-        device: Union[str, torch.device] = "cuda",
-        **kwargs,
     ) -> None:
-        """Run one evaluation pass and log aggregated loss/metric values.
-
-        Args:
-            time_step: Epoch index used for MLflow metric steps.
-            model: Model evaluated on the provided dataloader.
-            dataloader: Data split loader to iterate.
-            data_split: Logging prefix (for example ``train`` or ``validation``).
-            device: Kept for API consistency with callback hook signatures.
-            **kwargs: Additional unused callback arguments.
-        """
-
-        model.eval()
-
-        with torch.no_grad():
-            for batch_idx, samples in enumerate(dataloader):
-                generated_predictions = model(samples["input"])
-                sigmoid_generated_predictions = generated_predictions.clone()
-
-                if self.compute_sigmoid:
-                    sigmoid_generated_predictions = self.image_postprocessor(
-                        generated_predictions
-                    )
-
-                self.loss(
-                    generated_predictions=(
-                        generated_predictions
-                        if self.loss.use_logits
-                        else sigmoid_generated_predictions
-                    ),
-                    targets=samples["target"],
-                    data_split_logging=data_split,
-                    loss_mask=samples.get("loss_mask"),
-                )
-
-                for metric in self.metrics:
-                    metric(
-                        generated_predictions=(
-                            generated_predictions
-                            if metric.use_logits
-                            else sigmoid_generated_predictions
-                        ),
-                        targets=samples["target"],
-                        data_split_logging=data_split,
-                        loss_mask=samples.get("loss_mask"),
-                    )
-
-                if (
-                    self.max_eval_batches is not None
-                    and (batch_idx + 1) >= self.max_eval_batches
-                ):
-                    break
-
-            self._log_metrics(time_step=time_step)
-
-    def _assess_early_stopping(
-        self, epoch: int, signature: ModelSignature, model: Module, **kwargs
-    ) -> bool:
-        """Update early-stopping state and persist the best model.
-
-        Args:
-            epoch: Current epoch index.
-            signature: MLflow model signature inferred from validation samples.
-            model: Model to log when loss improves.
-            **kwargs: Additional unused callback arguments.
-
-        Returns:
-            ``True`` when training should continue, otherwise ``False``.
-        """
-
-        if self.best_loss_value > self.loss_value:
-            self.best_loss_value = self.loss_value
-            self.early_stopping_counter = 0
-
-            mlflow.pytorch.log_model(
-                model,
-                name="model",
-                signature=signature,
-                step=epoch,
-            )
-        else:
-            self.early_stopping_counter += 1
-            if self.early_stopping_counter >= self.early_stopping_counter_threshold:
-                print(f"Early stopping triggered at epoch {epoch}")
-                mlflow.log_param("early_stopping_epoch", epoch)
-                return False
-        return True
-
-    def _prepare_signature(
-        self, input_example: torch.Tensor, model: Module
-    ) -> ModelSignature:
-        """
-        To allow the model to be saved
-        """
-
-        model.eval()
-        with torch.no_grad():
-            output_example = (
-                self.image_postprocessor(model(input_example)).detach().cpu().numpy()
-            )
-
-        input_numpy = input_example.detach().cpu().numpy().astype("float32")
-
-        return infer_signature(input_numpy, output_example)
-
-    def _on_epoch_start(self, epoch: int, **kwargs) -> None:
-        """Print a progress message when an epoch begins."""
-
-        print(f"Starting epoch {epoch}")
-
-    def _on_batch_start(self, batch: int, **kwargs) -> None:
-        """Print a progress message at configured batch intervals."""
-
-        if batch % self.batch_log_every_n == 0:
-            print(f"Starting batch {batch}")
-
-    def _on_epoch_end(
-        self,
-        epoch: int,
-        model: Module,
-        train_dataloader: DataLoader,
-        val_dataloader: DataLoader,
-        device: Union[str, torch.device] = "cuda",
-        **kwargs,
-    ) -> None:
-        """
-        Logs metrics, determines if training should be stopped early, and saves the model.
-        """
-
-        for data_split, dataloader in [
-            ("train", train_dataloader),
-            ("validation", val_dataloader),
-        ]:
-            self._log_epoch_metrics(
-                model=model,
-                dataloader=dataloader,
-                data_split=data_split,
-                time_step=epoch,
-                device=device,
-                **kwargs,
-            )
-
-        # Images can be saved in different ways if desired in the future
-        if self.image_savers is None:
-            pass
-        elif isinstance(self.image_savers, list):
-            for image_saver in self.image_savers:
-                image_saver(model=model, epoch=epoch)
-        else:
-            self.image_savers(model=model, epoch=epoch)
-
-        val_sample = next(iter(val_dataloader))
-        val_sample = val_sample["input"]
-        signature = self._prepare_signature(input_example=val_sample, model=model)
-
-        return self._assess_early_stopping(
-            epoch=epoch, signature=signature, model=model
+        self.progress = ProgressLoggerCallback(batch_log_every_n=batch_log_every_n)
+        self.evaluator = EpochEvaluatorCallback(
+            metrics=metrics,
+            loss=loss,
+            image_postprocessor=image_postprocessor,
+            max_eval_batches=max_eval_batches,
+        )
+        self.metrics_logger = MetricsMlflowLoggerCallback(metrics=metrics, loss=loss)
+        self.image_saver = ImageSaverCallback(image_savers=image_savers)
+        self.early_stopping = EarlyStoppingAndCheckpointCallback(
+            early_stopping_counter_threshold=early_stopping_counter_threshold,
+            image_postprocessor=image_postprocessor,
         )
 
-    def _on_batch_end(self, batch: int, **kwargs) -> None:
-        """No-op hook reserved for end-of-batch extensions."""
+        self.composer = CallbackComposer(
+            callbacks=[
+                self.progress,
+                self.evaluator,
+                self.metrics_logger,
+                self.image_saver,
+                self.early_stopping,
+            ]
+        )
 
-        pass
+    @property
+    def best_loss_value(self) -> float:
+        return self.early_stopping.best_loss_value
 
-    def __call__(self, callback_hook: str, **kwargs) -> None:
-        """
-        Must return to possibly stop model training early
-        """
-        return getattr(self, f"_{callback_hook}")(**kwargs)
+    def __call__(self, callback_hook: str, **kwargs) -> Any:
+        context = kwargs
+        context.setdefault("continue_training", True)
+        self.composer.trigger(callback_hook=callback_hook, context=context)
+        return context.get("continue_training")
