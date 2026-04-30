@@ -19,6 +19,7 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
 )
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
+from losses.L1Loss import L1Loss
 from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PSNR import PSNR
@@ -96,8 +97,8 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1(is_loss=True, device=device)
-        loss_callbacks = L1(is_loss=True, device=device)
+        loss_trainer = L1Loss()
+        loss_callbacks = L1(device=device)
         metrics = [
             L2(device=device),
             PSNR(device=device, max_pixel_value=1.0),

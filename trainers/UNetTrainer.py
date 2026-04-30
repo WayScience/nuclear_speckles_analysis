@@ -1,9 +1,8 @@
 from typing import Any, Union
 
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
-
-from metrics.AbstractMetric import AbstractMetric
 
 
 class UNetTrainer:
@@ -15,7 +14,7 @@ class UNetTrainer:
         self,
         model: torch.nn.Module,
         model_optimizer: torch.optim.Optimizer,
-        model_loss: AbstractMetric,
+        model_loss: nn.Module,
         train_dataloader: Union[torch.utils.data.Dataset, DataLoader],
         val_dataloader: Union[torch.utils.data.Dataset, DataLoader],
         callbacks: Any,
