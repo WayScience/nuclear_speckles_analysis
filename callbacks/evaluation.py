@@ -1,0 +1,79 @@
+from typing import Any, List
+
+import torch
+from torch.nn import Module
+from torch.utils.data import DataLoader
+
+from callbacks.base import BaseCallback
+
+
+class EpochEvaluatorCallback(BaseCallback):
+    """Run epoch-end evaluation for configured data splits."""
+
+    def __init__(
+        self,
+        metrics: List,
+        loss: Module,
+        image_postprocessor: Any = lambda x: x,
+        max_eval_batches: int | None = None,
+    ) -> None:
+        self.metrics = metrics
+        self.loss = loss
+        self.image_postprocessor = image_postprocessor
+        self.max_eval_batches = max_eval_batches
+        self.compute_sigmoid = any(not metric.use_logits for metric in [*metrics, loss])
+
+    def on_epoch_end(self, context: dict[str, Any]) -> None:
+        model = context["model"]
+        for data_split, dataloader in [
+            ("train", context["train_dataloader"]),
+            ("validation", context["val_dataloader"]),
+        ]:
+            self._evaluate_split(model=model, dataloader=dataloader, data_split=data_split)
+
+    def _evaluate_split(
+        self,
+        model: Module,
+        dataloader: DataLoader,
+        data_split: str,
+    ) -> None:
+        model.eval()
+
+        with torch.no_grad():
+            for batch_idx, samples in enumerate(dataloader):
+                generated_predictions = model(samples["input"])
+                sigmoid_generated_predictions = generated_predictions.clone()
+
+                if self.compute_sigmoid:
+                    sigmoid_generated_predictions = self.image_postprocessor(
+                        generated_predictions
+                    )
+
+                self.loss(
+                    generated_predictions=(
+                        generated_predictions
+                        if self.loss.use_logits
+                        else sigmoid_generated_predictions
+                    ),
+                    targets=samples["target"],
+                    data_split_logging=data_split,
+                    loss_mask=samples.get("loss_mask"),
+                )
+
+                for metric in self.metrics:
+                    metric(
+                        generated_predictions=(
+                            generated_predictions
+                            if metric.use_logits
+                            else sigmoid_generated_predictions
+                        ),
+                        targets=samples["target"],
+                        data_split_logging=data_split,
+                        loss_mask=samples.get("loss_mask"),
+                    )
+
+                if (
+                    self.max_eval_batches is not None
+                    and (batch_idx + 1) >= self.max_eval_batches
+                ):
+                    break
