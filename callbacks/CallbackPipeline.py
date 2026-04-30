@@ -16,9 +16,9 @@ class CallbackComposer:
     def __init__(self, callbacks: list[Callback]) -> None:
         self.callbacks = callbacks
 
-    def trigger(self, callback_hook: str, context: dict[str, Any]) -> None:
+    def trigger(self, callback_hook: str, hook_data: dict[str, Any]) -> None:
         for callback in self.callbacks:
-            getattr(callback, callback_hook)(context)
+            getattr(callback, callback_hook)(hook_data)
 
 
 class CallbackPipeline:
@@ -63,7 +63,7 @@ class CallbackPipeline:
         return self.early_stopping.best_loss_value
 
     def __call__(self, callback_hook: str, **kwargs) -> Any:
-        context = kwargs
-        context.setdefault("continue_training", True)
-        self.composer.trigger(callback_hook=callback_hook, context=context)
-        return context.get("continue_training")
+        hook_data = kwargs
+        hook_data.setdefault("continue_training", True)
+        self.composer.trigger(callback_hook=callback_hook, hook_data=hook_data)
+        return hook_data.get("continue_training")
