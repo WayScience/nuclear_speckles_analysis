@@ -2,32 +2,76 @@ from typing import Any, Protocol
 
 
 class Callback(Protocol):
-    """Callback hook protocol for trainer lifecycle events."""
+    """Protocol for trainer lifecycle callback hooks.
 
-    def on_epoch_start(self, context: dict[str, Any]) -> None:
+    Implementers may read from and write to ``hook_data`` so callbacks can share
+    state within a single hook execution.
+    """
+
+    def on_epoch_start(self, hook_data: dict[str, Any]) -> None:
+        """Handle start-of-epoch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         ...
 
-    def on_batch_start(self, context: dict[str, Any]) -> None:
+    def on_batch_start(self, hook_data: dict[str, Any]) -> None:
+        """Handle start-of-batch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         ...
 
-    def on_batch_end(self, context: dict[str, Any]) -> None:
+    def on_batch_end(self, hook_data: dict[str, Any]) -> None:
+        """Handle end-of-batch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         ...
 
-    def on_epoch_end(self, context: dict[str, Any]) -> None:
+    def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
+        """Handle end-of-epoch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         ...
 
 
 class BaseCallback:
-    """No-op callback base class for selective hook overrides."""
+    """No-op base callback for selective hook overrides."""
 
-    def on_epoch_start(self, context: dict[str, Any]) -> None:
+    def on_epoch_start(self, hook_data: dict[str, Any]) -> None:
+        """Handle start-of-epoch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         pass
 
-    def on_batch_start(self, context: dict[str, Any]) -> None:
+    def on_batch_start(self, hook_data: dict[str, Any]) -> None:
+        """Handle start-of-batch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         pass
 
-    def on_batch_end(self, context: dict[str, Any]) -> None:
+    def on_batch_end(self, hook_data: dict[str, Any]) -> None:
+        """Handle end-of-batch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         pass
 
-    def on_epoch_end(self, context: dict[str, Any]) -> None:
+    def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
+        """Handle end-of-epoch hook.
+
+        Args:
+            hook_data: Shared hook payload for the current lifecycle event.
+        """
         pass
