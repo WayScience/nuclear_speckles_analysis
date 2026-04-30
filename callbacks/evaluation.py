@@ -78,7 +78,7 @@ class EpochEvaluatorCallback(BaseCallback):
                         generated_predictions
                     )
 
-                self.loss(
+                self.loss.update(
                     generated_predictions=(
                         generated_predictions
                         if self.loss.use_logits
