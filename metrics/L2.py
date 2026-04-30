@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Union
 
 import torch
 
@@ -32,13 +32,11 @@ class L2(AbstractMetric):
 
         self.total_squared_error = torch.tensor(0.0, device=self.device)
         self.total_elements = torch.tensor(0.0, device=self.device)
-        self.data_split_logging: Optional[str] = None
 
     def forward(
         self,
         generated_predictions: torch.Tensor,
         targets: torch.Tensor,
-        data_split_logging: Optional[str] = None,
         **kwargs,
     ) -> None:
         """Accumulate batch L2 statistics for split-level logging.
@@ -46,20 +44,15 @@ class L2(AbstractMetric):
         Args:
             generated_predictions: Model predictions.
             targets: Ground-truth targets with matching shape.
-            data_split_logging: Split name used in final metric key.
             **kwargs: Additional unused metric arguments.
 
         Raises:
-            ValueError: If shapes mismatch or split name is missing.
+            ValueError: If shapes mismatch.
         """
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
-        if data_split_logging is None:
-            raise ValueError("L2 is logging-only and requires data_split_logging.")
-
-        self.data_split_logging = data_split_logging
         sq_error = (generated_predictions - targets) ** 2
         self.total_squared_error += sq_error.sum().detach().to(self.device)
         self.total_elements += torch.tensor(
@@ -69,18 +62,20 @@ class L2(AbstractMetric):
         )
         return None
 
-    def get_metric_data(self) -> dict[str, float]:
-        """Return averaged L2 value for the accumulated split and reset state.
+    def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
+        """Alias for state updates to align with TorchMetrics-like API."""
+
+        self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
+
+    def compute(self) -> torch.Tensor:
+        """Compute averaged L2 value for currently accumulated state.
 
         Returns:
             Mapping from metric name to scalar value.
 
         Raises:
-            ValueError: If no split data has been accumulated.
+            Scalar tensor with current L2 value.
         """
-
-        if self.data_split_logging is None:
-            raise ValueError("No accumulated split data found for L2 metric logging.")
 
         average_l2 = torch.where(
             self.total_elements > 0,
@@ -89,7 +84,17 @@ class L2(AbstractMetric):
         )
         if not torch.isfinite(average_l2):
             average_l2 = torch.tensor(0.0, device=self.device)
+        return average_l2
 
-        metric_data = {f"l2_total_{self.data_split_logging}": average_l2.item()}
+    @property
+    def metric_name(self) -> str:
+        """Base metric key for logging."""
+
+        return "l2_total"
+
+    def get_metric_data(self) -> dict[str, float]:
+        """Backward-compatible helper that computes and resets state."""
+
+        metric_data = {self.metric_name: self.compute().item()}
         self.reset()
         return metric_data

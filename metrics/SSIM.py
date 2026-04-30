@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Union
 
 import torch
 
@@ -35,13 +35,11 @@ class SSIM(AbstractMetric):
 
         self.total_ssim = torch.tensor(0.0, device=self.device)
         self.total_samples = torch.tensor(0.0, device=self.device)
-        self.data_split_logging: Optional[str] = None
 
     def forward(
         self,
         generated_predictions: torch.Tensor,
         targets: torch.Tensor,
-        data_split_logging: Optional[str] = None,
         **kwargs,
     ) -> None:
         """Accumulate per-sample SSIM values for a split.
@@ -49,20 +47,14 @@ class SSIM(AbstractMetric):
         Args:
             generated_predictions: Model predictions.
             targets: Ground-truth targets with matching shape.
-            data_split_logging: Split name used in final metric key.
             **kwargs: Additional unused metric arguments.
 
         Raises:
-            ValueError: If shapes mismatch or split name is missing.
+            ValueError: If shapes mismatch.
         """
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
-
-        if data_split_logging is None:
-            raise ValueError("SSIM is logging-only and requires data_split_logging.")
-
-        self.data_split_logging = data_split_logging
 
         mu_x = generated_predictions.mean(dim=(2, 3), keepdim=True)
         mu_y = targets.mean(dim=(2, 3), keepdim=True)
@@ -89,18 +81,17 @@ class SSIM(AbstractMetric):
         )
         return None
 
-    def get_metric_data(self) -> dict[str, float]:
-        """Return averaged SSIM for the accumulated split and reset state.
+    def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
+        """Alias for state updates to align with TorchMetrics-like API."""
+
+        self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
+
+    def compute(self) -> torch.Tensor:
+        """Compute averaged SSIM for currently accumulated state.
 
         Returns:
-            Mapping from metric name to scalar value.
-
-        Raises:
-            ValueError: If no split data has been accumulated.
+            Scalar tensor with current SSIM value.
         """
-
-        if self.data_split_logging is None:
-            raise ValueError("No accumulated split data found for SSIM metric logging.")
 
         average_ssim = torch.where(
             self.total_samples > 0,
@@ -109,7 +100,17 @@ class SSIM(AbstractMetric):
         )
         if not torch.isfinite(average_ssim):
             average_ssim = torch.tensor(0.0, device=self.device)
+        return average_ssim
 
-        metric_data = {f"ssim_total_{self.data_split_logging}": average_ssim.item()}
+    @property
+    def metric_name(self) -> str:
+        """Base metric key for logging."""
+
+        return "ssim_total"
+
+    def get_metric_data(self) -> dict[str, float]:
+        """Backward-compatible helper that computes and resets state."""
+
+        metric_data = {self.metric_name: self.compute().item()}
         self.reset()
         return metric_data
