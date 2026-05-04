@@ -109,30 +109,22 @@ def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: 
         Tuple of (window_start, window_end), where window_end is exclusive.
 
     Raises:
-        ValueError: If axis_limit is not positive.
+        ValueError: If axis_limit or target_size is not positive.
     """
 
     if axis_limit <= 0:
         raise ValueError(f"axis_limit must be positive, got {axis_limit}")
+
+    if target_size <= 0:
+        raise ValueError(f"target_size must be positive, got {target_size}")
 
     if target_size >= axis_limit:
         return 0, axis_limit
 
     center = (start + end) / 2.0
     window_start = int(round(center - target_size / 2.0))
+    window_start = min(max(window_start, 0), axis_limit - target_size)
     window_end = window_start + target_size
-
-    if window_start < 0:
-        window_end -= window_start
-        window_start = 0
-
-    if window_end > axis_limit:
-        shift = window_end - axis_limit
-        window_start -= shift
-        window_end = axis_limit
-
-    if window_start < 0:
-        window_start = 0
 
     return window_start, window_end
 
