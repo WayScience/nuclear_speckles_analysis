@@ -1,24 +1,10 @@
 # nuclear_speckles_analysis
 
-This repository trains a UNet-style image-to-image translation model on cropped nuclei from `/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw`.
+This repository trains a UNet-style image-to-image translation model on cropped nuclei from multiple nuclear speckle datasets (including the initial dataset and U2OS).
 
 - Input: cropped DAPI (`CH0`) nucleus image
 - Target: cropped Gold (`CH2`) nucleus image
 - Task: predict Gold crops from DAPI crops
-
-## Data Pipeline
-
-Training uses cached, filtered single-cell crops generated from:
-
-- `/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw/IC_corrected_images`
-- `/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw/Preprocessed_data/single_cell_profiles/*annotated*.parquet`
-
-`datasets/dataset_00/utils/CropCacheBuilder.py` builds the crop cache and manifest when needed. Plate, well, site, and channel metadata are parsed from `IC_corrected_images` filenames split by `_`:
-
-- field 1: plate
-- field 2: well
-- field 3: site
-- field 4: channel (`CH0` for DAPI input, `CH2` for Gold target)
 
 ### Normalization
 
