@@ -14,7 +14,6 @@ AGENTS.md
 
 # Local training/runtime artifacts
 cached_nuclear_speckles_data/
-nuclear_speckles_data/
 mlartifacts/
 mlflow.db
 optuna_study.joblib

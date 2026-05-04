@@ -60,7 +60,7 @@ from ShuffledMIC import ShuffledMIC
 
 
 # Paths to original nuclear speckle data
-data_dir = root_dir / "nuclear_speckles_data"
+data_dir = pathlib.Path("/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw")
 nuclear_mask_dir = (data_dir / "Nuclear_masks").resolve(strict=True)
 sc_profiles_path = list((data_dir / "Preprocessed_data/single_cell_profiles").resolve(strict=True).glob("*feature_selected*.parquet"))
 
@@ -260,4 +260,3 @@ for left_out_stain in stains:
 
 
 micdfs.to_parquet(mic_comparisons_path / "well_sirna_mic_comparisons.parquet")
-

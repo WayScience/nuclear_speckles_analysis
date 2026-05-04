@@ -47,7 +47,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # In[3]:
 
 
-data_dir = root_dir / "nuclear_speckles_data"
+data_dir = pathlib.Path("/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw")
 nuclear_mask_dir = (data_dir / "Nuclear_masks").resolve(strict=True)
 sc_profiles_path = list((data_dir / "Preprocessed_data/single_cell_profiles").resolve(strict=True).glob("*annotated*.parquet"))
 
