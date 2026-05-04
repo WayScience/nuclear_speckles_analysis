@@ -1,5 +1,4 @@
 import argparse
-import os
 import pathlib
 import random
 from typing import Any, Callable
@@ -9,15 +8,14 @@ import mlflow
 import numpy as np
 import optuna
 import torch
+from models.UNet import UNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache,
-    load_cache_manifest,
-)
+    ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1Loss import L1Loss
@@ -25,12 +23,15 @@ from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
-from models.UNet import UNet
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
 
-
-DEFAULT_DATA_DIR = "/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw"
+U2OS_IMAGE_DIR = pathlib.Path(
+    "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
+)
+U2OS_PARQUET_PATH = pathlib.Path(
+    "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
+)
 
 
 parser = argparse.ArgumentParser()
@@ -39,11 +40,6 @@ parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
-parser.add_argument(
-    "--data-dir",
-    type=pathlib.Path,
-    default=pathlib.Path(os.environ.get("NUCLEAR_SPECKLES_DATA_DIR", DEFAULT_DATA_DIR)),
-)
 args = parser.parse_args()
 
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
@@ -136,7 +132,8 @@ class OptimizationManager:
             return trainer_obj.best_loss_value
 
 
-data_dir = args.data_dir.resolve(strict=True)
+image_dir = U2OS_IMAGE_DIR.resolve(strict=True)
+parquet_path = U2OS_PARQUET_PATH.resolve(strict=True)
 cache_root = pathlib.Path("cached_nuclear_speckles_data")
 crop_cache_path = cache_root / "dapi_to_gold_crop_cache"
 tensor_cache_path = cache_root / "paired_tensor_cache"
@@ -156,7 +153,11 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 """
 mlflow.set_tag("mlflow.note.content", description)
 
-cache_result = ensure_dapi_to_gold_cache(data_dir=data_dir, cache_dir=crop_cache_path)
+cache_result = ensure_dapi_to_gold_cache(
+    image_dir=image_dir,
+    parquet_path=parquet_path,
+    cache_dir=crop_cache_path,
+)
 manifest_rows = load_cache_manifest(manifest_path=cache_result.manifest_path)
 image_specs = cache_result.image_specs
 
