@@ -1,4 +1,5 @@
 import argparse
+import os
 import pathlib
 import random
 from typing import Any, Callable
@@ -29,12 +30,20 @@ from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
 
 
+DEFAULT_DATA_DIR = "/mnt/big_drive/nuclear_speckle_data/initial_dataset/initial_dataset_raw"
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
+parser.add_argument(
+    "--data-dir",
+    type=pathlib.Path,
+    default=pathlib.Path(os.environ.get("NUCLEAR_SPECKLES_DATA_DIR", DEFAULT_DATA_DIR)),
+)
 args = parser.parse_args()
 
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
@@ -127,7 +136,7 @@ class OptimizationManager:
             return trainer_obj.best_loss_value
 
 
-data_dir = pathlib.Path("nuclear_speckles_data").resolve(strict=True)
+data_dir = args.data_dir.resolve(strict=True)
 cache_root = pathlib.Path("cached_nuclear_speckles_data")
 crop_cache_path = cache_root / "dapi_to_gold_crop_cache"
 tensor_cache_path = cache_root / "paired_tensor_cache"
@@ -142,7 +151,7 @@ description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
 - UNet Generator
 - Single 2D crop input and single 2D crop target
-- Cache-backed filtered nucleus crops generated from nuclear_speckles_data
+- Cache-backed filtered nucleus crops generated from the configured data directory
 - L1 optimization objective with L2, PSNR, and SSIM metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
