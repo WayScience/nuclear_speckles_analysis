@@ -95,8 +95,8 @@ def _filter_bounding_box_size(scdf: pd.DataFrame, bounding_box_col: str) -> pd.D
 def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: int) -> tuple[int, int]:
     """Compute a fixed-size crop window and shift it inside image bounds.
 
-    The window is centered on the provided [start, end) interval midpoint.
-    If the window would extend outside the field of view, it is translated so
+    The window is, by default, centered on the provided [start, end) interval midpoint.
+    If the window would extend outside the field of view, the window is translated so
     it fits within [0, axis_limit) instead of introducing zero padding.
 
     Args:
