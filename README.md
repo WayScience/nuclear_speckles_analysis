@@ -2,9 +2,24 @@
 
 This repository trains a UNet-style image-to-image translation model on cropped nuclei from multiple nuclear speckle datasets (including the initial dataset and U2OS).
 
-- Input: cropped DAPI (`CH0`) nucleus image
-- Target: cropped Gold (`CH2`) nucleus image
+- Input: cropped DAPI nucleus image
+- Target: cropped Gold nucleus image
 - Task: predict Gold crops from DAPI crops
+
+Dataset-specific channel mappings:
+
+- `initial`: DAPI=`CH0`, Gold=`CH2`
+- `u2os`: DAPI=`CH01`, Gold=`CH03`
+
+Dataset-specific cache roots:
+
+- `initial`: `/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache`
+- `u2os`: `/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache`
+
+Within each cache root, training uses:
+
+- `dapi_to_gold_crop_cache`
+- `paired_tensor_cache`
 
 ### Normalization
 
@@ -22,6 +37,9 @@ Fast smoke run:
 
 ```bash
 uv run train.py --epochs 1 --n-trials 1 --max-train-batches 2 --max-eval-batches 2 --enable-image-savers 0
+
+# Select dataset (defaults to u2os)
+uv run train.py --dataset initial --epochs 1 --n-trials 1 --max-train-batches 2 --max-eval-batches 2 --enable-image-savers 0
 ```
 
 ## Loss and Metrics

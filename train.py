@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import random
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import joblib
@@ -26,12 +27,49 @@ from metrics.SSIM import SSIM
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
 
-U2OS_IMAGE_DIR = pathlib.Path(
-    "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
-)
-U2OS_PARQUET_PATH = pathlib.Path(
-    "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
-)
+@dataclass(frozen=True)
+class DatasetConfig:
+    image_dir: pathlib.Path
+    parquet_path: pathlib.Path
+    cache_root: pathlib.Path
+    input_channel: str
+    target_channel: str
+    metadata_column_map: dict[str, str] | None = None
+
+
+DATASET_CONFIGS = {
+    "u2os": DatasetConfig(
+        image_dir=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
+        ),
+        parquet_path=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
+        ),
+        cache_root=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache"
+        ),
+        input_channel="CH01",
+        target_channel="CH03",
+    ),
+    "initial": DatasetConfig(
+        image_dir=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/IC_corrected_images"
+        ),
+        parquet_path=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/Preprocessed_data/cleaned_sc_profiles"
+        ),
+        cache_root=pathlib.Path(
+            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache"
+        ),
+        input_channel="CH0",
+        target_channel="CH2",
+        metadata_column_map={
+            "Image_Metadata_Plate": "Metadata_Plate",
+            "Image_Metadata_Well": "Metadata_Well",
+            "Image_Metadata_Site": "Metadata_Site",
+        },
+    ),
+}
 
 
 parser = argparse.ArgumentParser()
@@ -40,6 +78,7 @@ parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
+parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 args = parser.parse_args()
 
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
@@ -132,9 +171,10 @@ class OptimizationManager:
             return trainer_obj.best_loss_value
 
 
-image_dir = U2OS_IMAGE_DIR.resolve(strict=True)
-parquet_path = U2OS_PARQUET_PATH.resolve(strict=True)
-cache_root = pathlib.Path("cached_nuclear_speckles_data")
+dataset_config = DATASET_CONFIGS[args.dataset]
+image_dir = dataset_config.image_dir.resolve(strict=True)
+parquet_path = dataset_config.parquet_path.resolve(strict=True)
+cache_root = dataset_config.cache_root
 crop_cache_path = cache_root / "dapi_to_gold_crop_cache"
 tensor_cache_path = cache_root / "paired_tensor_cache"
 
@@ -143,6 +183,9 @@ random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
 mlflow.log_param("random_seed", 0)
+mlflow.log_param("dataset", args.dataset)
+mlflow.log_param("input_channel", dataset_config.input_channel)
+mlflow.log_param("target_channel", dataset_config.target_channel)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -157,6 +200,9 @@ cache_result = ensure_dapi_to_gold_cache(
     image_dir=image_dir,
     parquet_path=parquet_path,
     cache_dir=crop_cache_path,
+    input_channel=dataset_config.input_channel,
+    target_channel=dataset_config.target_channel,
+    metadata_column_map=dataset_config.metadata_column_map,
 )
 manifest_rows = load_cache_manifest(manifest_path=cache_result.manifest_path)
 image_specs = cache_result.image_specs

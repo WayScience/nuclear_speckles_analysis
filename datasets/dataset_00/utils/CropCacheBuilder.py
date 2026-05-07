@@ -132,11 +132,15 @@ def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: 
     return window_start, window_end
 
 
-def _build_filtered_profiles(parquet_path: pathlib.Path) -> pd.DataFrame:
+def _build_filtered_profiles(
+    parquet_path: pathlib.Path,
+    metadata_column_map: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """Load, align, and filter annotated single-cell profile tables.
 
     Args:
-        parquet_path: Absolute path to single-cell profile parquet.
+        parquet_path: Absolute path to a single parquet file or a directory of parquets.
+        metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
         Profile DataFrame with required metadata and cleaned bounding-box columns.
@@ -147,7 +151,19 @@ def _build_filtered_profiles(parquet_path: pathlib.Path) -> pd.DataFrame:
     """
 
     parquet_path = parquet_path.resolve(strict=True)
-    scdf = pd.read_parquet(parquet_path)
+    if parquet_path.is_dir():
+        parquet_files = sorted(parquet_path.glob("*.parquet"))
+        if not parquet_files:
+            raise FileNotFoundError(f"No parquet files found in directory: {parquet_path}")
+        scdf = pd.concat((pd.read_parquet(path) for path in parquet_files), ignore_index=True)
+    else:
+        scdf = pd.read_parquet(parquet_path)
+
+    if metadata_column_map:
+        available_renames = {
+            source: target for source, target in metadata_column_map.items() if source in scdf.columns
+        }
+        scdf = scdf.rename(columns=available_renames)
     common_columns = set(scdf.columns)
 
     required_cols = {
@@ -284,13 +300,19 @@ def ensure_dapi_to_gold_cache(
     image_dir: pathlib.Path,
     parquet_path: pathlib.Path,
     cache_dir: pathlib.Path,
+    input_channel: str,
+    target_channel: str,
+    metadata_column_map: dict[str, str] | None = None,
 ) -> CropCacheResult:
-    """Build or reuse a CH0(DAPI) to CH2(Gold) crop cache.
+    """Build or reuse a DAPI-to-Gold crop cache for configured channels.
 
     Args:
         image_dir: Directory containing source TIFF images.
         parquet_path: Path to single-cell profile parquet.
         cache_dir: Destination directory for cached crop TIFFs and manifest.
+        input_channel: Source channel name used for DAPI input crops.
+        target_channel: Target channel name used for Gold target crops.
+        metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
         Manifest path plus inferred image specs for training configuration.
@@ -310,7 +332,10 @@ def ensure_dapi_to_gold_cache(
             image_specs=_infer_image_specs(rows=existing_rows),
         )
 
-    scdf = _build_filtered_profiles(parquet_path=parquet_path)
+    scdf = _build_filtered_profiles(
+        parquet_path=parquet_path,
+        metadata_column_map=metadata_column_map,
+    )
 
     target_width = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_X"].max())
     target_height = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_Y"].max())
@@ -324,8 +349,8 @@ def ensure_dapi_to_gold_cache(
     for image_key, keyed_images in image_index.items():
         plate_name, well_name, site_name = image_key
 
-        dapi_img_path = keyed_images.get("CH0")
-        gold_img_path = keyed_images.get("CH2")
+        dapi_img_path = keyed_images.get(input_channel)
+        gold_img_path = keyed_images.get(target_channel)
 
         if dapi_img_path is None or gold_img_path is None:
             continue
@@ -411,8 +436,8 @@ def ensure_dapi_to_gold_cache(
                     "plate": plate_name,
                     "well": well_name,
                     "site": site_name,
-                    "input_channel": "CH0",
-                    "target_channel": "CH2",
+                    "input_channel": input_channel,
+                    "target_channel": target_channel,
                     "input_path": str(input_path.resolve()),
                     "target_path": str(target_path.resolve()),
                 }
