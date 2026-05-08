@@ -3,6 +3,7 @@ name: nuclear_speckles_analysis
 entry_points:
   train_model:
     parameters:
+      dataset: {type: str, default: "initial"}
       epochs: {type: int, default: 20}
       n_trials: {type: int, default: 4}
       max_train_batches: {type: int, default: -1}
@@ -10,6 +11,7 @@ entry_points:
       enable_image_savers: {type: int, default: 1}
     command: >
       uv run train.py
+      --dataset {dataset}
       --epochs {epochs}
       --n-trials {n_trials}
       --max-train-batches {max_train_batches}

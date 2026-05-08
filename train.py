@@ -83,6 +83,10 @@ DATASET_CONFIGS = {
             "Image_Metadata_Plate": "Metadata_Plate",
             "Image_Metadata_Well": "Metadata_Well",
             "Image_Metadata_Site": "Metadata_Site",
+            "Nuclei_AreaShape_BoundingBoxMinimum_X": "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
+            "Nuclei_AreaShape_BoundingBoxMaximum_X": "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
+            "Nuclei_AreaShape_BoundingBoxMinimum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
+            "Nuclei_AreaShape_BoundingBoxMaximum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
         },
     ),
 }
