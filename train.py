@@ -29,6 +29,18 @@ from trainers.UNetTrainer import UNetTrainer
 
 @dataclass(frozen=True)
 class DatasetConfig:
+    """Dataset-specific paths and column/channel normalization settings.
+
+    Attributes:
+        image_dir: Root directory containing source TIFF image files.
+        parquet_path: Path to single-cell profile parquet data.
+        cache_root: Base directory where dataset caches are written.
+        input_channel: Source channel name used for model input crop selection.
+        target_channel: Target channel name used for supervision crop selection.
+        metadata_column_map: Optional source-to-canonical metadata renaming map
+            applied before crop cache generation.
+    """
+
     image_dir: pathlib.Path
     parquet_path: pathlib.Path
     cache_root: pathlib.Path
@@ -51,6 +63,7 @@ DATASET_CONFIGS = {
         input_channel="CH01",
         target_channel="CH03",
         metadata_column_map={
+            # U2OS profiles label imaging site as "Metadata_Position".
             "Metadata_Position": "Metadata_Site",
         },
     ),

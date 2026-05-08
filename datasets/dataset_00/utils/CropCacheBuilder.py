@@ -49,7 +49,8 @@ def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], di
         image_dir: Root directory containing TIFF images.
 
     Returns:
-        Nested mapping keyed by (plate, well, site) and then channel name.
+        Nested mapping keyed by (plate, well, site) and then uppercase
+        channel name.
     """
 
     image_index: dict[tuple[str, str, str], dict[str, pathlib.Path]] = {}
@@ -59,6 +60,7 @@ def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], di
         if "excluded" in image_path.parts:
             continue
         plate, well, site, channel = _parse_image_filename(image_path.name)
+        # Normalize channel token case so config values and filenames match reliably.
         channel = channel.upper()
         key = (plate, well, site)
         if key not in image_index:
@@ -311,8 +313,10 @@ def ensure_dapi_to_gold_cache(
         image_dir: Directory containing source TIFF images.
         parquet_path: Path to single-cell profile parquet.
         cache_dir: Destination directory for cached crop TIFFs and manifest.
-        input_channel: Source channel name used for DAPI input crops.
-        target_channel: Target channel name used for Gold target crops.
+        input_channel: Source channel name used for DAPI input crops. The value
+            is normalized to uppercase before channel lookup and manifest writes.
+        target_channel: Target channel name used for Gold target crops. The value
+            is normalized to uppercase before channel lookup and manifest writes.
         metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
