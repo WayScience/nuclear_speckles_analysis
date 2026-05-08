@@ -50,6 +50,9 @@ DATASET_CONFIGS = {
         ),
         input_channel="CH01",
         target_channel="CH03",
+        metadata_column_map={
+            "Metadata_Position": "Metadata_Site",
+        },
     ),
     "initial": DatasetConfig(
         image_dir=pathlib.Path(

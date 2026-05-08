@@ -59,6 +59,7 @@ def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], di
         if "excluded" in image_path.parts:
             continue
         plate, well, site, channel = _parse_image_filename(image_path.name)
+        channel = channel.upper()
         key = (plate, well, site)
         if key not in image_index:
             image_index[key] = {}
@@ -323,6 +324,8 @@ def ensure_dapi_to_gold_cache(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = cache_dir / "manifest.csv"
+    input_channel = input_channel.upper()
+    target_channel = target_channel.upper()
 
     is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
     if is_valid:
