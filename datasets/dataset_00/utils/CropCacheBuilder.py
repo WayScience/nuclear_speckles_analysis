@@ -153,6 +153,30 @@ def _build_filtered_profiles(
         ValueError: If required profile columns are missing.
     """
 
+    def _normalize_token(value: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", value.lower())
+
+    def _resolve_column_by_substring(
+        columns: list[str],
+        required_name: str,
+    ) -> str:
+        required_norm = _normalize_token(required_name)
+        matches = [
+            column
+            for column in columns
+            if required_norm in _normalize_token(column)
+        ]
+        if not matches:
+            raise ValueError(
+                f"Missing required profile column containing '{required_name}'. "
+                f"Available columns: {sorted(columns)}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous profile columns for '{required_name}': {sorted(matches)}"
+            )
+        return matches[0]
+
     parquet_path = parquet_path.resolve(strict=True)
     if parquet_path.is_dir():
         parquet_files = sorted(parquet_path.glob("*.parquet"))
@@ -169,18 +193,42 @@ def _build_filtered_profiles(
         scdf = scdf.rename(columns=available_renames)
     common_columns = set(scdf.columns)
 
-    required_cols = {
+    required_metadata_cols = {
         "Metadata_Plate",
         "Metadata_Well",
         "Metadata_Site",
+    }
+    required_bbox_cols = {
         "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
         "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
         "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
         "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
     }
-    missing_cols = sorted(required_cols - common_columns)
-    if missing_cols:
-        raise ValueError(f"Missing required profile columns: {missing_cols}")
+    required_cols = required_metadata_cols | required_bbox_cols
+
+    missing_metadata_cols = sorted(required_metadata_cols - common_columns)
+    if missing_metadata_cols:
+        raise ValueError(f"Missing required profile columns: {missing_metadata_cols}")
+
+    missing_bbox_cols = sorted(required_bbox_cols - common_columns)
+    if missing_bbox_cols:
+        resolved_renames: dict[str, str] = {}
+        source_columns = list(scdf.columns)
+        for required_col in missing_bbox_cols:
+            basename = required_col.removeprefix("Metadata_")
+            source_column = _resolve_column_by_substring(
+                columns=source_columns,
+                required_name=basename,
+            )
+            resolved_renames[source_column] = required_col
+
+        if resolved_renames:
+            scdf = scdf.rename(columns=resolved_renames)
+            common_columns = set(scdf.columns)
+
+        still_missing_bbox_cols = sorted(required_bbox_cols - common_columns)
+        if still_missing_bbox_cols:
+            raise ValueError(f"Missing required profile columns: {still_missing_bbox_cols}")
 
     keep_cols = [c for c in scdf.columns if c in common_columns and (c.startswith("Metadata_") or c in required_cols)]
     scdf = scdf[keep_cols].copy()
