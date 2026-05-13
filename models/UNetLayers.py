@@ -40,18 +40,26 @@ class Conv(nn.Module):
         return x
 
 
-class DoubleConv(nn.Module):
+class ConvBlock2(nn.Module):
     """
-    Can be used in both the encoder and decoder of a unet
+    Generalized two-convolution block used in UNet paths.
+
+    This is not a strict canonical UNet double-conv block. The first and
+    second convolutions can use different strides, which allows this block to
+    either preserve or change spatial resolution.
+
+    Typical usage in this repository:
+    - Encoder: first_conv_stride=1, second_conv_stride=2 for downsampling.
+    - Decoder: first_conv_stride=1, second_conv_stride=1 for shape preserving.
     """
     def __init__(
         self,
         normalization: nn.Module,
-        ascending: bool,
         in_channels: int,
         out_channels: int,
         kernel_size: int,
-        stride: int,
+        first_conv_stride: int,
+        second_conv_stride: int,
         padding: int,
         padding_mode: str = "zeros",
         pooling: nn.Module = None,
@@ -62,7 +70,7 @@ class DoubleConv(nn.Module):
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
-            stride=stride,
+            stride=first_conv_stride,
             padding=padding,
             padding_mode=padding_mode,
             normalization=normalization,
@@ -73,7 +81,7 @@ class DoubleConv(nn.Module):
             in_channels=out_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
-            stride=1 if ascending else 2,
+            stride=second_conv_stride,
             padding=padding,
             padding_mode=padding_mode,
             normalization=normalization,
@@ -110,7 +118,7 @@ class UpConv(nn.Module):
     def forward(self, encmap: torch.Tensor, decmap: torch.Tensor) -> torch.Tensor:
         encmap = self.pad_match(encmap, decmap)
         encmap = torch.cat([decmap, encmap], dim=1)
-        return encmap  # Note: return concatenated map; conv is done in DoubleConv
+        return encmap  # Note: return concatenated map; conv is done in ConvBlock2
 
 
 class OutConv(nn.Module):

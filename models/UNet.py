@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .UNetLayers import Conv, DoubleConv, OutConv, UpConv
+from .UNetLayers import Conv, ConvBlock2, OutConv, UpConv
 
 
 class UNet(nn.Module):
@@ -46,13 +46,13 @@ class UNet(nn.Module):
         encoder_channels = []
 
         for i in range(4):
-            self.down[f"down{i}"] = DoubleConv(
+            self.down[f"down{i}"] = ConvBlock2(
                 normalization=nn.BatchNorm2d,
-                ascending=False,
                 in_channels=in_ch,
                 out_channels=out_ch,
                 kernel_size=3,
-                stride=1,
+                first_conv_stride=1,
+                second_conv_stride=2,
                 padding=1,
                 padding_mode="zeros",
                 pooling=None,
@@ -73,13 +73,13 @@ class UNet(nn.Module):
         for i, enc_channel in enumerate(encoder_channels):
             in_ch = enc_channel + (enc_channel // 2)
             out_ch = enc_channel // 2
-            self.up_convs[f"up_conv{i}"] = DoubleConv(
+            self.up_convs[f"up_conv{i}"] = ConvBlock2(
                 normalization=nn.BatchNorm2d,
-                ascending=True,
                 in_channels=in_ch,
                 out_channels=out_ch,
                 kernel_size=3,
-                stride=1,
+                first_conv_stride=1,
+                second_conv_stride=1,
                 padding=1,
                 padding_mode="zeros",
                 pooling=None,
