@@ -49,13 +49,19 @@ def _build_image_index(image_dir: pathlib.Path) -> dict[tuple[str, str, str], di
         image_dir: Root directory containing TIFF images.
 
     Returns:
-        Nested mapping keyed by (plate, well, site) and then channel name.
+        Nested mapping keyed by (plate, well, site) and then uppercase
+        channel name.
     """
 
     image_index: dict[tuple[str, str, str], dict[str, pathlib.Path]] = {}
 
-    for image_path in sorted(image_dir.glob("**/*.tiff")):
+    image_paths = sorted(image_dir.glob("**/*.tiff")) + sorted(image_dir.glob("**/*.tif"))
+    for image_path in image_paths:
+        if "excluded" in image_path.parts:
+            continue
         plate, well, site, channel = _parse_image_filename(image_path.name)
+        # Normalize channel token case so config values and filenames match reliably.
+        channel = channel.upper()
         key = (plate, well, site)
         if key not in image_index:
             image_index[key] = {}
@@ -129,11 +135,15 @@ def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: 
     return window_start, window_end
 
 
-def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
+def _build_filtered_profiles(
+    parquet_path: pathlib.Path,
+    metadata_column_map: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """Load, align, and filter annotated single-cell profile tables.
 
     Args:
-        data_dir: Dataset root directory.
+        parquet_path: Absolute path to a single parquet file or a directory of parquets.
+        metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
         Profile DataFrame with required metadata and cleaned bounding-box columns.
@@ -143,46 +153,102 @@ def _build_filtered_profiles(data_dir: pathlib.Path) -> pd.DataFrame:
         ValueError: If required profile columns are missing.
     """
 
-    profile_dir = data_dir / "Preprocessed_data" / "single_cell_profiles"
-    profile_paths = sorted(profile_dir.glob("*annotated*.parquet"))
-    if not profile_paths:
-        raise FileNotFoundError(f"No annotated parquet files found in {profile_dir}")
+    def _normalize_token(value: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", value.lower())
 
-    scdfs = [pd.read_parquet(path) for path in profile_paths]
-    common_columns = set(scdfs[0].columns)
-    for scdf in scdfs[1:]:
-        common_columns &= set(scdf.columns)
+    def _resolve_column_by_substring(
+        columns: list[str],
+        required_name: str,
+    ) -> str:
+        required_norm = _normalize_token(required_name)
+        matches = [
+            column
+            for column in columns
+            if required_norm in _normalize_token(column)
+        ]
+        if not matches:
+            raise ValueError(
+                f"Missing required profile column containing '{required_name}'. "
+                f"Available columns: {sorted(columns)}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous profile columns for '{required_name}': {sorted(matches)}"
+            )
+        return matches[0]
 
-    required_cols = {
+    parquet_path = parquet_path.resolve(strict=True)
+    if parquet_path.is_dir():
+        parquet_files = sorted(parquet_path.glob("*.parquet"))
+        if not parquet_files:
+            raise FileNotFoundError(f"No parquet files found in directory: {parquet_path}")
+        scdf = pd.concat((pd.read_parquet(path) for path in parquet_files), ignore_index=True)
+    else:
+        scdf = pd.read_parquet(parquet_path)
+
+    if metadata_column_map:
+        available_renames = {
+            source: target for source, target in metadata_column_map.items() if source in scdf.columns
+        }
+        scdf = scdf.rename(columns=available_renames)
+    common_columns = set(scdf.columns)
+
+    required_metadata_cols = {
         "Metadata_Plate",
         "Metadata_Well",
         "Metadata_Site",
-        "Nuclei_AreaShape_BoundingBoxMinimum_X",
-        "Nuclei_AreaShape_BoundingBoxMaximum_X",
-        "Nuclei_AreaShape_BoundingBoxMinimum_Y",
-        "Nuclei_AreaShape_BoundingBoxMaximum_Y",
     }
-    missing_cols = sorted(required_cols - common_columns)
-    if missing_cols:
-        raise ValueError(f"Missing required profile columns: {missing_cols}")
+    required_bbox_cols = {
+        "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
+    }
+    required_cols = required_metadata_cols | required_bbox_cols
 
-    keep_cols = [c for c in scdfs[0].columns if c in common_columns and (c.startswith("Metadata_") or c in required_cols)]
-    scdf = pd.concat(scdfs, axis=0, ignore_index=True)[keep_cols].copy()
+    missing_metadata_cols = sorted(required_metadata_cols - common_columns)
+    if missing_metadata_cols:
+        raise ValueError(f"Missing required profile columns: {missing_metadata_cols}")
+
+    missing_bbox_cols = sorted(required_bbox_cols - common_columns)
+    if missing_bbox_cols:
+        resolved_renames: dict[str, str] = {}
+        source_columns = list(scdf.columns)
+        for required_col in missing_bbox_cols:
+            basename = required_col.removeprefix("Metadata_")
+            source_column = _resolve_column_by_substring(
+                columns=source_columns,
+                required_name=basename,
+            )
+            resolved_renames[source_column] = required_col
+
+        if resolved_renames:
+            scdf = scdf.rename(columns=resolved_renames)
+            common_columns = set(scdf.columns)
+
+        still_missing_bbox_cols = sorted(required_bbox_cols - common_columns)
+        if still_missing_bbox_cols:
+            raise ValueError(f"Missing required profile columns: {still_missing_bbox_cols}")
+
+    keep_cols = [c for c in scdf.columns if c in common_columns and (c.startswith("Metadata_") or c in required_cols)]
+    scdf = scdf[keep_cols].copy()
 
     bbox_cols = [
-        "Nuclei_AreaShape_BoundingBoxMinimum_X",
-        "Nuclei_AreaShape_BoundingBoxMaximum_X",
-        "Nuclei_AreaShape_BoundingBoxMinimum_Y",
-        "Nuclei_AreaShape_BoundingBoxMaximum_Y",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
+        "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
     ]
     for col in bbox_cols:
         scdf[col] = scdf[col].astype(int)
 
     scdf["Nuclei_AreaShape_BoundingBoxDelta_X"] = (
-        scdf["Nuclei_AreaShape_BoundingBoxMaximum_X"] - scdf["Nuclei_AreaShape_BoundingBoxMinimum_X"]
+        scdf["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X"]
+        - scdf["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X"]
     )
     scdf["Nuclei_AreaShape_BoundingBoxDelta_Y"] = (
-        scdf["Nuclei_AreaShape_BoundingBoxMaximum_Y"] - scdf["Nuclei_AreaShape_BoundingBoxMinimum_Y"]
+        scdf["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y"]
+        - scdf["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y"]
     )
 
     # Filter bbox width/height outliers before generating fixed-size crops.
@@ -282,14 +348,24 @@ def _infer_image_specs(rows: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def ensure_dapi_to_gold_cache(
-    data_dir: pathlib.Path,
+    image_dir: pathlib.Path,
+    parquet_path: pathlib.Path,
     cache_dir: pathlib.Path,
+    input_channel: str,
+    target_channel: str,
+    metadata_column_map: dict[str, str] | None = None,
 ) -> CropCacheResult:
-    """Build or reuse a CH0(DAPI) to CH2(Gold) crop cache.
+    """Build or reuse a DAPI-to-Gold crop cache for configured channels.
 
     Args:
-        data_dir: Dataset root containing masks, images, and profile tables.
+        image_dir: Directory containing source TIFF images.
+        parquet_path: Path to single-cell profile parquet.
         cache_dir: Destination directory for cached crop TIFFs and manifest.
+        input_channel: Source channel name used for DAPI input crops. The value
+            is normalized to uppercase before channel lookup and manifest writes.
+        target_channel: Target channel name used for Gold target crops. The value
+            is normalized to uppercase before channel lookup and manifest writes.
+        metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
         Manifest path plus inferred image specs for training configuration.
@@ -300,6 +376,8 @@ def ensure_dapi_to_gold_cache(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = cache_dir / "manifest.csv"
+    input_channel = input_channel.upper()
+    target_channel = target_channel.upper()
 
     is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
     if is_valid:
@@ -309,39 +387,25 @@ def ensure_dapi_to_gold_cache(
             image_specs=_infer_image_specs(rows=existing_rows),
         )
 
-    scdf = _build_filtered_profiles(data_dir=data_dir)
+    scdf = _build_filtered_profiles(
+        parquet_path=parquet_path,
+        metadata_column_map=metadata_column_map,
+    )
 
     target_width = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_X"].max())
     target_height = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_Y"].max())
 
     rows: list[dict[str, str]] = []
 
-    nuclear_mask_dir = (data_dir / "Nuclear_masks").resolve(strict=True)
-    image_dir = (data_dir / "IC_corrected_images").resolve(strict=True)
+    image_dir = image_dir.resolve(strict=True)
 
     image_index = _build_image_index(image_dir=image_dir)
 
-    dapi_mask_paths = sorted(nuclear_mask_dir.glob("**/*CH0*.tiff"))
+    for image_key, keyed_images in image_index.items():
+        plate_name, well_name, site_name = image_key
 
-    for dapi_mask_path in dapi_mask_paths:
-        dapi_filename = dapi_mask_path.name.replace("_MaskNuclei", "")
-        try:
-            plate_name, well_name, site_name, mask_channel = _parse_image_filename(
-                dapi_filename
-            )
-        except ValueError:
-            continue
-
-        if mask_channel != "CH0":
-            continue
-
-        image_key = (plate_name, well_name, site_name)
-        keyed_images = image_index.get(image_key)
-        if keyed_images is None:
-            continue
-
-        dapi_img_path = keyed_images.get("CH0")
-        gold_img_path = keyed_images.get("CH2")
+        dapi_img_path = keyed_images.get(input_channel)
+        gold_img_path = keyed_images.get(target_channel)
 
         if dapi_img_path is None or gold_img_path is None:
             continue
@@ -354,30 +418,29 @@ def ensure_dapi_to_gold_cache(
         if image_df.empty:
             continue
 
-        dapi_mask = tifffile.imread(dapi_mask_path)
         dapi_img = tifffile.imread(dapi_img_path)
         gold_img = tifffile.imread(gold_img_path)
 
-        if dapi_mask.ndim != 2 or dapi_img.ndim != 2 or gold_img.ndim != 2:
+        if dapi_img.ndim != 2 or gold_img.ndim != 2:
             raise ValueError(
-                "Expected 2D CH0 mask, DAPI image, and Gold image after selecting a single z-crop."
+                "Expected 2D DAPI image and Gold image after selecting a single z-crop."
             )
 
         image_df = image_df.copy()
         bbox_cols = [
-            "Nuclei_AreaShape_BoundingBoxMinimum_X",
-            "Nuclei_AreaShape_BoundingBoxMaximum_X",
-            "Nuclei_AreaShape_BoundingBoxMinimum_Y",
-            "Nuclei_AreaShape_BoundingBoxMaximum_Y",
+            "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
+            "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
+            "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
+            "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
         ]
         for col in bbox_cols:
             image_df[col] = image_df[col].astype(int)
 
         for _, nucleus in image_df.iterrows():
-            x0 = int(nucleus["Nuclei_AreaShape_BoundingBoxMinimum_X"])
-            y0 = int(nucleus["Nuclei_AreaShape_BoundingBoxMinimum_Y"])
-            x1 = int(nucleus["Nuclei_AreaShape_BoundingBoxMaximum_X"])
-            y1 = int(nucleus["Nuclei_AreaShape_BoundingBoxMaximum_Y"])
+            x0 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X"])
+            y0 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y"])
+            x1 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X"])
+            y1 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y"])
 
             crop_x0, crop_x1 = _compute_shifted_window(
                 start=x0,
@@ -393,7 +456,6 @@ def ensure_dapi_to_gold_cache(
             )
 
             cropped_dapi = dapi_img[crop_y0:crop_y1, crop_x0:crop_x1].copy()
-            cropped_mask = dapi_mask[crop_y0:crop_y1, crop_x0:crop_x1]
             cropped_gold = gold_img[crop_y0:crop_y1, crop_x0:crop_x1].copy()
 
             if cropped_dapi.size == 0 or cropped_gold.size == 0:
@@ -401,10 +463,6 @@ def ensure_dapi_to_gold_cache(
 
             # Skip empty-signal crops.
             if cropped_dapi.max() == 0 or cropped_gold.max() == 0:
-                continue
-
-            # Keep raw background intensity values; do not zero outside mask.
-            if cropped_mask.size == 0:
                 continue
 
             center_x = (x0 + x1) / 2
@@ -433,8 +491,8 @@ def ensure_dapi_to_gold_cache(
                     "plate": plate_name,
                     "well": well_name,
                     "site": site_name,
-                    "input_channel": "CH0",
-                    "target_channel": "CH2",
+                    "input_channel": input_channel,
+                    "target_channel": target_channel,
                     "input_path": str(input_path.resolve()),
                     "target_path": str(target_path.resolve()),
                 }

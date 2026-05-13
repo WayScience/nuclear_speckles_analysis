@@ -1,24 +1,25 @@
 # nuclear_speckles_analysis
 
-This repository trains a UNet-style image-to-image translation model on cropped nuclei from `nuclear_speckles_data`.
+This repository trains a UNet-style image-to-image translation model on cropped nuclei from multiple nuclear speckle datasets (including the initial dataset and U2OS).
 
-- Input: cropped DAPI (`CH0`) nucleus image
-- Target: cropped Gold (`CH2`) nucleus image
+- Input: cropped DAPI nucleus image
+- Target: cropped Gold nucleus image
 - Task: predict Gold crops from DAPI crops
 
-## Data Pipeline
+Dataset-specific channel mappings:
 
-Training uses cached, filtered single-cell crops generated from:
+- `initial`: DAPI=`CH0`, Gold=`CH2`
+- `u2os`: DAPI=`CH01`, Gold=`CH03`
 
-- `nuclear_speckles_data/IC_corrected_images`
-- `nuclear_speckles_data/Preprocessed_data/single_cell_profiles/*annotated*.parquet`
+Dataset-specific cache roots:
 
-`datasets/dataset_00/utils/CropCacheBuilder.py` builds the crop cache and manifest when needed. Plate, well, site, and channel metadata are parsed from `IC_corrected_images` filenames split by `_`:
+- `initial`: `/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache`
+- `u2os`: `/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache`
 
-- field 1: plate
-- field 2: well
-- field 3: site
-- field 4: channel (`CH0` for DAPI input, `CH2` for Gold target)
+Within each cache root, training uses:
+
+- `dapi_to_gold_crop_cache`
+- `paired_tensor_cache`
 
 ### Normalization
 
@@ -36,6 +37,9 @@ Fast smoke run:
 
 ```bash
 uv run train.py --epochs 1 --n-trials 1 --max-train-batches 2 --max-eval-batches 2 --enable-image-savers 0
+
+# Select dataset (defaults to u2os)
+uv run train.py --dataset initial --epochs 1 --n-trials 1 --max-train-batches 2 --max-eval-batches 2 --enable-image-savers 0
 ```
 
 ## Loss and Metrics
