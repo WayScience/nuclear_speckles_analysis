@@ -242,8 +242,8 @@ crop_image_dataset = CellCropToCropDataset(
 
 hash_splitter = HashSplitter(
     dataset=crop_image_dataset,
-    train_frac=0.8,
-    val_frac=0.1,
+    train_frac=0.825,
+    val_frac=0.125,
 )
 
 _, val_dataloader, _ = hash_splitter(batch_size=16)
