@@ -47,6 +47,7 @@ class DatasetConfig:
     input_channel: str
     target_channel: str
     metadata_column_map: dict[str, str] | None = None
+    holdout_plate: str | None = None
 
 
 DATASET_CONFIGS = {
@@ -66,6 +67,7 @@ DATASET_CONFIGS = {
             # U2OS profiles label imaging site as "Metadata_Position".
             "Metadata_Position": "Metadata_Site",
         },
+        holdout_plate="Rep3",
     ),
     "initial": DatasetConfig(
         image_dir=pathlib.Path(
@@ -88,6 +90,7 @@ DATASET_CONFIGS = {
             "Nuclei_AreaShape_BoundingBoxMinimum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
             "Nuclei_AreaShape_BoundingBoxMaximum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
         },
+        holdout_plate="slide2",
     ),
 }
 
@@ -224,7 +227,27 @@ cache_result = ensure_dapi_to_gold_cache(
     target_channel=dataset_config.target_channel,
     metadata_column_map=dataset_config.metadata_column_map,
 )
-manifest_rows = load_cache_manifest(manifest_path=cache_result.manifest_path)
+manifest_nuclei = load_cache_manifest(manifest_path=cache_result.manifest_path)
+manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
+if dataset_config.holdout_plate is not None:
+    manifest_nuclei = [
+        nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
+    ]
+manifest_nuclei_after_holdout_filter = len(manifest_nuclei)
+
+if not manifest_nuclei:
+    raise ValueError(
+        "No cropped nuclei remain after applying holdout plate filter. "
+        f"dataset={args.dataset}, holdout_plate={dataset_config.holdout_plate}"
+    )
+
+mlflow.log_param("holdout_plate", dataset_config.holdout_plate)
+mlflow.log_param(
+    "manifest_nuclei_before_holdout_filter", manifest_nuclei_before_holdout_filter
+)
+mlflow.log_param(
+    "manifest_nuclei_after_holdout_filter", manifest_nuclei_after_holdout_filter
+)
 image_specs = cache_result.image_specs
 
 mlflow.log_param("input_max_pixel_value", image_specs["input_max_pixel_value"])
@@ -234,7 +257,7 @@ image_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
 image_postprocessor = ImagePostProcessor()
 
 crop_image_dataset = CellCropToCropDataset(
-    manifest_rows=manifest_rows,
+    manifest_rows=manifest_nuclei,
     image_specs=image_specs,
     image_preprocessor=image_preprocessor,
     image_cache_path=tensor_cache_path,
@@ -242,8 +265,8 @@ crop_image_dataset = CellCropToCropDataset(
 
 hash_splitter = HashSplitter(
     dataset=crop_image_dataset,
-    train_frac=0.8,
-    val_frac=0.1,
+    train_frac=0.825,
+    val_frac=0.125,
 )
 
 _, val_dataloader, _ = hash_splitter(batch_size=16)
