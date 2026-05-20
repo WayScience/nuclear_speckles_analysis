@@ -9,7 +9,7 @@ import mlflow
 import numpy as np
 import optuna
 import torch
-from models.UNet import UNet
+from models.unext2.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
@@ -212,7 +212,7 @@ mlflow.log_param("target_channel", dataset_config.target_channel)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
-- UNet Generator
+- ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - L1 optimization objective with L2, PSNR, and SSIM metric logging
@@ -290,7 +290,11 @@ optimization_manager = OptimizationManager(
     hash_splitter=hash_splitter,
     dataset=crop_image_dataset,
     callbacks_args=callbacks_args,
-    model_factory=lambda: UNet(in_channels=1, out_channels=1),
+    model_factory=lambda: ConvNeXtUNet(
+        in_channels=1,
+        out_channels=1,
+        decoder_up_block="convt",
+    ),
     epochs=args.epochs,
     max_train_batches=max_train_batches,
 )
