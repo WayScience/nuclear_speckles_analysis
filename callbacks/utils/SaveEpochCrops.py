@@ -15,6 +15,7 @@ class SaveEpochCrops:
         image_dataset: torch.utils.data.Dataset,
         image_postprocessor: Any = lambda x: x,
         image_dataset_idxs: Optional[list[int]] = None,
+        split_name: str = "validation",
     ) -> None:
         """Initialize epoch-wise crop saving configuration.
 
@@ -22,6 +23,7 @@ class SaveEpochCrops:
             image_dataset: Dataset used to fetch fixed samples for visualization.
             image_postprocessor: Transform applied to model predictions before saving.
             image_dataset_idxs: Optional dataset indices to save each epoch.
+            split_name: Split label used in artifact paths (for example, training).
         """
 
         self.image_dataset = image_dataset
@@ -29,6 +31,7 @@ class SaveEpochCrops:
         self.image_dataset_idxs = (
             range(len(image_dataset)) if image_dataset_idxs is None else image_dataset_idxs
         )
+        self.split_name = split_name
 
     def save_image(
         self,
@@ -70,7 +73,7 @@ class SaveEpochCrops:
 
         image_suffix = ".tiff" if ".tif" in image_path.suffix else image_path.suffix
         save_image_path_folder = (
-            f"cropped_images/epoch_{epoch:02}/{plate}/{well}_{site}/{sample_id}"
+            f"cropped_images/{self.split_name}/epoch_{epoch:02}/{plate}/{well}_{site}/{sample_id}"
         )
         image_filename = f"{image_type}_{image_path.stem}{image_suffix}"
 
