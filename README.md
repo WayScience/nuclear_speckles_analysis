@@ -53,3 +53,8 @@ Metrics are implemented in `metrics/` and logged through `callbacks/Callbacks.py
 
 - Crop-level prediction artifacts can be logged each epoch via `callbacks/utils/SaveEpochCrops.py`.
 - Whole-FOV reconstruction and patch stitching are intentionally removed.
+
+## Third-Party Attribution
+
+- The code in `models/unext2/` is adapted from `virtual_stain_flow` by WayScience (contributor: Weishan Li).
+- See `THIRD_PARTY_NOTICES.md` for source and license details.
