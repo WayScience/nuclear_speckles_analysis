@@ -279,9 +279,9 @@ hash_splitter = HashSplitter(
 
 train_dataloader, val_dataloader, _ = hash_splitter(batch_size=16)
 train_crop_dataset_idxs = SampleImages(
-    datastruct=train_dataloader, image_fraction=1 / 128
+    datastruct=train_dataloader, image_fraction=1 / 512
 )()
-val_crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 32)()
+val_crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 64)()
 
 # Save a fixed subset of predictions each epoch for qualitative drift checks.
 train_image_prediction_saver = SaveEpochCrops(
