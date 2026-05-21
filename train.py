@@ -269,18 +269,33 @@ hash_splitter = HashSplitter(
     val_frac=0.125,
 )
 
-_, val_dataloader, _ = hash_splitter(batch_size=16)
-crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 32)()
+train_dataloader, val_dataloader, _ = hash_splitter(batch_size=16)
+train_crop_dataset_idxs = SampleImages(
+    datastruct=train_dataloader, image_fraction=1 / 128
+)()
+val_crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 32)()
 
-image_prediction_saver = SaveEpochCrops(
+train_image_prediction_saver = SaveEpochCrops(
+    image_dataset=train_dataloader.dataset.dataset,
+    image_postprocessor=image_postprocessor,
+    image_dataset_idxs=train_crop_dataset_idxs,
+    split_name="training",
+)
+
+val_image_prediction_saver = SaveEpochCrops(
     image_dataset=val_dataloader.dataset.dataset,
     image_postprocessor=image_postprocessor,
-    image_dataset_idxs=crop_dataset_idxs,
+    image_dataset_idxs=val_crop_dataset_idxs,
+    split_name="validation",
 )
 
 callbacks_args = {
     "early_stopping_counter_threshold": 5,
-    "image_savers": [image_prediction_saver] if args.enable_image_savers == 1 else None,
+    "image_savers": (
+        [train_image_prediction_saver, val_image_prediction_saver]
+        if args.enable_image_savers == 1
+        else None
+    ),
     "image_postprocessor": image_postprocessor,
     "max_eval_batches": max_eval_batches,
 }
