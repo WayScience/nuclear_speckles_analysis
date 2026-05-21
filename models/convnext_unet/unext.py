@@ -1,11 +1,15 @@
 """
-/models/unext.py
+ConvNeXtUNet model module.
 
-This module defines a read-to-use ConvNeXtUNet model, a more advanced 
-U-Net style architecture for image-to-image translation tasks. 
+This module defines a ready-to-use ConvNeXtUNet architecture for 2D
+image-to-image translation tasks.
+
+The implementation is adapted from the virtual_stain_flow repository and
+is inspired by UNeXt2 naming and design ideas, but it is not a full
+reproduction of the Cytoland UNeXt2 architecture.
 
 Classes:
-    ConvNeXtUNet: Implements a U-Net style model with a ConvNeXtV2_tiny
+    ConvNeXtUNet: Implements a U-Net-style model with a ConvNeXtV2-tiny
     encoder and a customizable decoder.
 """
 

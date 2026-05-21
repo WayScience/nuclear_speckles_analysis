@@ -56,5 +56,5 @@ Metrics are implemented in `metrics/` and logged through `callbacks/Callbacks.py
 
 ## Third-Party Attribution
 
-- The code in `models/unext2/` is adapted from `virtual_stain_flow` by WayScience (contributor: Weishan Li).
+- The code in `models/convnext_unet/` is adapted from `virtual_stain_flow` by WayScience (contributor: Weishan Li).
 - See `THIRD_PARTY_NOTICES.md` for source and license details.

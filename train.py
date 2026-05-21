@@ -9,7 +9,7 @@ import mlflow
 import numpy as np
 import optuna
 import torch
-from models.unext2.unext import ConvNeXtUNet
+from models.convnext_unet.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
