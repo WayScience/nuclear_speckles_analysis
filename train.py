@@ -104,6 +104,7 @@ parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 args = parser.parse_args()
 
+# Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
 
@@ -148,9 +149,11 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
+        # Let Optuna choose a mini-batch size and learning rate for this trial.
         batch_size = trial.suggest_int("batch_size", 8, 32)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
 
+        # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
@@ -172,6 +175,7 @@ class OptimizationManager:
             SSIM(device=device, max_pixel_value=1.0),
         ]
 
+        # Use a nested MLflow run so each Optuna trial has its own metrics/artifacts.
         with mlflow.start_run(nested=True, run_name=f"trial_{trial.number}"):
             optimizer = torch.optim.Adam(**optimizer_params)
             self.trainer_kwargs["model_optimizer"] = optimizer
@@ -201,6 +205,7 @@ cache_root = dataset_config.cache_root
 crop_cache_path = cache_root / "dapi_to_gold_crop_cache"
 tensor_cache_path = cache_root / "paired_tensor_cache"
 
+# Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 np.random.seed(0)
@@ -219,6 +224,7 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 """
 mlflow.set_tag("mlflow.note.content", description)
 
+# Build or reuse cropped-nuclei cache so training does not repeatedly parse raw image files.
 cache_result = ensure_dapi_to_gold_cache(
     image_dir=image_dir,
     parquet_path=parquet_path,
@@ -230,6 +236,7 @@ cache_result = ensure_dapi_to_gold_cache(
 manifest_nuclei = load_cache_manifest(manifest_path=cache_result.manifest_path)
 manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
 if dataset_config.holdout_plate is not None:
+    # Keep one plate fully held out to prevent leakage across similar acquisition batches.
     manifest_nuclei = [
         nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
     ]
@@ -263,24 +270,41 @@ crop_image_dataset = CellCropToCropDataset(
     image_cache_path=tensor_cache_path,
 )
 
+# HashSplitter uses metadata-derived IDs, so splits stay stable across reruns.
 hash_splitter = HashSplitter(
     dataset=crop_image_dataset,
     train_frac=0.825,
     val_frac=0.125,
 )
 
-_, val_dataloader, _ = hash_splitter(batch_size=16)
-crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 32)()
+train_dataloader, val_dataloader, _ = hash_splitter(batch_size=16)
+train_crop_dataset_idxs = SampleImages(
+    datastruct=train_dataloader, image_fraction=1 / 512
+)()
+val_crop_dataset_idxs = SampleImages(datastruct=val_dataloader, image_fraction=1 / 64)()
 
-image_prediction_saver = SaveEpochCrops(
+# Save a fixed subset of predictions each epoch for qualitative drift checks.
+train_image_prediction_saver = SaveEpochCrops(
+    image_dataset=train_dataloader.dataset.dataset,
+    image_postprocessor=image_postprocessor,
+    image_dataset_idxs=train_crop_dataset_idxs,
+    split_name="training",
+)
+
+val_image_prediction_saver = SaveEpochCrops(
     image_dataset=val_dataloader.dataset.dataset,
     image_postprocessor=image_postprocessor,
-    image_dataset_idxs=crop_dataset_idxs,
+    image_dataset_idxs=val_crop_dataset_idxs,
+    split_name="validation",
 )
 
 callbacks_args = {
     "early_stopping_counter_threshold": 5,
-    "image_savers": [image_prediction_saver] if args.enable_image_savers == 1 else None,
+    "image_savers": (
+        [train_image_prediction_saver, val_image_prediction_saver]
+        if args.enable_image_savers == 1
+        else None
+    ),
     "image_postprocessor": image_postprocessor,
     "max_eval_batches": max_eval_batches,
 }
