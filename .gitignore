@@ -1,5 +1,9 @@
 # Ignore models folder since there are a lot of them (>600)
 models*
+!models/
+models/*
+!models/convnext_unet/
+!models/convnext_unet/**
 
 # Ignore data splits due to large size
 data*
