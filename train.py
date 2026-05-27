@@ -23,6 +23,7 @@ from losses.L1Loss import L1Loss
 from metrics.DISTS import DISTS
 from metrics.L1 import L1
 from metrics.L2 import L2
+from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
 from splitters.HashSplitter import HashSplitter
@@ -175,6 +176,7 @@ class OptimizationManager:
             PSNR(device=device, max_pixel_value=1.0),
             SSIM(device=device, max_pixel_value=1.0),
             DISTS(device=device),
+            PearsonCorrelation(device=device),
         ]
 
         # Use a nested MLflow run so each Optuna trial has its own metrics/artifacts.
@@ -222,7 +224,7 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- L1 optimization objective with L2, PSNR, SSIM, and DISTS metric logging
+- L1 optimization objective with L2, PSNR, SSIM, DISTS, and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
