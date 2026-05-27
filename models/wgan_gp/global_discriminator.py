@@ -29,30 +29,60 @@ class GlobalDiscriminator(nn.Module):
         in_channels: Number of channels in the input image tensor.
         base_channels: Number of feature channels in the first convolutional
             block. Later blocks scale this as ``x2``, ``x4``, and ``x8``.
+        num_blocks: Number of strided convolutional blocks used for
+            downsampling.
+        max_channels: Optional upper bound for feature channel width in deeper
+            blocks. If ``None``, channels are uncapped.
     """
 
-    def __init__(self, in_channels: int = 1, base_channels: int = 64):
-        """Initialize the global discriminator network."""
+    def __init__(
+        self,
+        in_channels: int = 1,
+        base_channels: int = 64,
+        num_blocks: int = 4,
+        max_channels: int | None = None,
+    ):
+        """Initialize the global discriminator network.
+
+        Args:
+            in_channels: Number of channels in each input image.
+            base_channels: Channel width used by the first convolutional block.
+            num_blocks: Number of stride-2 convolutional feature blocks.
+            max_channels: Optional cap on block output channels.
+        """
         super().__init__()
 
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, base_channels, 4, 2, 1),
-            nn.LeakyReLU(0.2, inplace=True),
+        if num_blocks < 1:
+            raise ValueError(f"Expected num_blocks >= 1, got {num_blocks}.")
+        if base_channels < 1:
+            raise ValueError(f"Expected base_channels >= 1, got {base_channels}.")
+        if max_channels is not None and max_channels < 1:
+            raise ValueError(f"Expected max_channels >= 1, got {max_channels}.")
 
-            nn.Conv2d(base_channels, base_channels * 2, 4, 2, 1),
-            nn.LeakyReLU(0.2, inplace=True),
+        feature_blocks: list[nn.Module] = []
+        in_ch = in_channels
+        out_ch = base_channels
 
-            nn.Conv2d(base_channels * 2, base_channels * 4, 4, 2, 1),
-            nn.LeakyReLU(0.2, inplace=True),
+        for block_idx in range(num_blocks):
+            if block_idx > 0:
+                out_ch = base_channels * (2 ** block_idx)
+            if max_channels is not None:
+                out_ch = min(out_ch, max_channels)
 
-            nn.Conv2d(base_channels * 4, base_channels * 8, 4, 2, 1),
-            nn.LeakyReLU(0.2, inplace=True),
-        )
+            feature_blocks.extend(
+                [
+                    nn.Conv2d(in_ch, out_ch, 4, 2, 1),
+                    nn.LeakyReLU(0.2),
+                ]
+            )
+            in_ch = out_ch
+
+        self.features = nn.Sequential(*feature_blocks)
 
         self.classifier = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(base_channels * 8, 1),
+            nn.Linear(in_ch, 1),
         )
 
     def forward(self, x):
@@ -62,8 +92,8 @@ class GlobalDiscriminator(nn.Module):
             x: Input tensor of shape ``(batch, in_channels, height, width)``.
 
         Returns:
-            Tensor of shape ``(batch, 1)`` with unconstrained critic scores.
+            Tensor of shape ``(batch,)`` with unconstrained critic scores.
             Larger values indicate samples judged as more real by the critic.
         """
 
-        return self.classifier(self.features(x))
+        return self.classifier(self.features(x)).squeeze(-1)
