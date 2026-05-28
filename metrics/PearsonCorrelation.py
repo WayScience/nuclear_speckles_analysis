@@ -31,7 +31,7 @@ class PearsonCorrelation(AbstractMetric):
         """Reset running Pearson correlation accumulators."""
 
         self.total_pearson = torch.tensor(0.0, device=self.device)
-        self.total_samples = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
@@ -75,7 +75,7 @@ class PearsonCorrelation(AbstractMetric):
         )
 
         self.total_pearson += per_sample_pearson.sum().detach()
-        self.total_samples += torch.tensor(
+        self.total_examples += torch.tensor(
             per_sample_pearson.shape[0],
             dtype=torch.float32,
             device=self.device,
@@ -95,8 +95,8 @@ class PearsonCorrelation(AbstractMetric):
         """
 
         average_pearson = torch.where(
-            self.total_samples > 0,
-            self.total_pearson / self.total_samples,
+            self.total_examples > 0,
+            self.total_pearson / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_pearson):

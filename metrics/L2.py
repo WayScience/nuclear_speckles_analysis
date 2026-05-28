@@ -31,7 +31,7 @@ class L2(AbstractMetric):
         """Reset running squared-error accumulators."""
 
         self.total_squared_error = torch.tensor(0.0, device=self.device)
-        self.total_samples = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
@@ -58,7 +58,7 @@ class L2(AbstractMetric):
         per_sample_l2 = sq_error.mean(dim=1)
 
         self.total_squared_error += per_sample_l2.sum().detach().to(self.device)
-        self.total_samples += torch.tensor(
+        self.total_examples += torch.tensor(
             per_sample_l2.numel(),
             dtype=torch.float32,
             device=self.device,
@@ -74,15 +74,12 @@ class L2(AbstractMetric):
         """Compute averaged L2 value for currently accumulated state.
 
         Returns:
-            Mapping from metric name to scalar value.
-
-        Raises:
             Scalar tensor with current L2 value.
         """
 
         average_l2 = torch.where(
-            self.total_samples > 0,
-            self.total_squared_error / self.total_samples,
+            self.total_examples > 0,
+            self.total_squared_error / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_l2):

@@ -37,7 +37,7 @@ class LPIPS(AbstractMetric):
         """Reset running LPIPS accumulators."""
 
         self.total_lpips = torch.tensor(0.0, device=self.device)
-        self.total_samples = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """Prepare image tensor for LPIPS input conventions."""
@@ -81,7 +81,7 @@ class LPIPS(AbstractMetric):
         lpips_values = lpips_values.view(-1)
 
         self.total_lpips += lpips_values.sum().detach().to(self.device)
-        self.total_samples += torch.tensor(
+        self.total_examples += torch.tensor(
             lpips_values.numel(),
             dtype=torch.float32,
             device=self.device,
@@ -101,8 +101,8 @@ class LPIPS(AbstractMetric):
         """
 
         average_lpips = torch.where(
-            self.total_samples > 0,
-            self.total_lpips / self.total_samples,
+            self.total_examples > 0,
+            self.total_lpips / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_lpips):

@@ -31,23 +31,20 @@ class L1(AbstractMetric):
         """Reset running L1 accumulators used for epoch-level logging."""
 
         self.total_abs_error = torch.tensor(0.0, device=self.device)
-        self.total_samples = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
         generated_predictions: torch.Tensor,
         targets: torch.Tensor,
         **kwargs,
-    ) -> torch.Tensor | None:
-        """Compute batch L1 loss or accumulate split statistics.
+    ) -> None:
+        """Accumulate batch L1 statistics for split-level logging.
 
         Args:
             generated_predictions: Model predictions.
             targets: Ground-truth targets with matching shape.
             **kwargs: Additional unused metric arguments.
-
-        Returns:
-            ``None``.
 
         Raises:
             ValueError: If prediction and target shapes differ.
@@ -61,7 +58,7 @@ class L1(AbstractMetric):
         per_sample_l1 = abs_error.mean(dim=1)
 
         self.total_abs_error += per_sample_l1.sum().detach().to(self.device)
-        self.total_samples += torch.tensor(
+        self.total_examples += torch.tensor(
             per_sample_l1.numel(),
             dtype=torch.float32,
             device=self.device,
@@ -77,15 +74,12 @@ class L1(AbstractMetric):
         """Compute averaged L1 value for currently accumulated state.
 
         Returns:
-            Mapping from metric name to scalar value.
-
-        Raises:
             Scalar tensor with current L1 value.
         """
 
         average_l1 = torch.where(
-            self.total_samples > 0,
-            self.total_abs_error / self.total_samples,
+            self.total_examples > 0,
+            self.total_abs_error / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_l1):
