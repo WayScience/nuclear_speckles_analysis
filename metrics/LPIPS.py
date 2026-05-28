@@ -1,7 +1,7 @@
 from typing import Literal, Union
 
-import lpips
 import torch
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from .AbstractMetric import AbstractMetric
 
@@ -29,15 +29,17 @@ class LPIPS(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
-        self.lpips_metric = lpips.LPIPS(net=self.net).to(self.device)
-        self.lpips_metric.eval()
+        self.lpips_metric = LearnedPerceptualImagePatchSimilarity(
+            net_type=self.net,
+            reduction="mean",
+            normalize=False,
+        ).to(self.device)
         self.reset()
 
     def reset(self):
         """Reset running LPIPS accumulators."""
 
-        self.total_lpips = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.lpips_metric.reset()
 
     def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """Prepare image tensor for LPIPS input conventions."""
@@ -77,15 +79,7 @@ class LPIPS(AbstractMetric):
         predictions_lpips = self._prepare_tensor(generated_predictions)
         targets_lpips = self._prepare_tensor(targets)
 
-        lpips_values = self.lpips_metric(predictions_lpips, targets_lpips)
-        lpips_values = lpips_values.view(-1)
-
-        self.total_lpips += lpips_values.sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            lpips_values.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.lpips_metric.update(predictions_lpips, targets_lpips)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -100,11 +94,7 @@ class LPIPS(AbstractMetric):
             Scalar tensor with current LPIPS value.
         """
 
-        average_lpips = torch.where(
-            self.total_examples > 0,
-            self.total_lpips / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
+        average_lpips = self.lpips_metric.compute().to(self.device)
         if not torch.isfinite(average_lpips):
             average_lpips = torch.tensor(0.0, device=self.device)
         return average_lpips
