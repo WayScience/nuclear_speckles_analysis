@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Literal, Union
 
 import lpips
 import torch
@@ -11,14 +11,14 @@ class LPIPS(AbstractMetric):
 
     def __init__(
         self,
-        net: str = "vgg",
+        net: Literal["alex", "vgg", "squeeze"] = "vgg",
         use_logits: bool = False,
         device: Union[str, torch.device] = "cuda",
     ):
         """Configure LPIPS accumulation settings.
 
         Args:
-            net: Backbone network variant for LPIPS (for example, ``vgg`` or ``alex``).
+            net: Backbone network variant for LPIPS (``alex``, ``vgg``, or ``squeeze``).
             use_logits: Whether caller should provide logits instead of postprocessed outputs.
             device: Device for accumulation buffers.
         """
