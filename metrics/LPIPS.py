@@ -1,37 +1,60 @@
-from typing import Union
+from typing import Literal, Union
 
 import torch
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from .AbstractMetric import AbstractMetric
 
 
-class L2(AbstractMetric):
-    """L2 (MSE) metric with epoch accumulation support."""
+class LPIPS(AbstractMetric):
+    """LPIPS metric with epoch accumulation support."""
 
     def __init__(
         self,
+        net: Literal["alex", "vgg", "squeeze"] = "vgg",
         use_logits: bool = False,
         device: Union[str, torch.device] = "cuda",
     ):
-        """Configure L2 (MSE) metric accumulation.
+        """Configure LPIPS accumulation settings.
 
         Args:
+            net: Backbone network variant for LPIPS (``alex``, ``vgg``, or ``squeeze``).
             use_logits: Whether caller should provide logits instead of postprocessed outputs.
             device: Device for accumulation buffers.
         """
 
         super().__init__()
+        self.net = net
         self.use_logits = use_logits
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
+        self.lpips_metric = LearnedPerceptualImagePatchSimilarity(
+            net_type=self.net,
+            reduction="mean",
+            normalize=False,
+        ).to(self.device)
         self.reset()
 
     def reset(self):
-        """Reset running squared-error accumulators."""
+        """Reset running LPIPS accumulators."""
 
-        self.total_squared_error = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.lpips_metric.reset()
+
+    def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
+        """Prepare image tensor for LPIPS input conventions."""
+
+        x = x.to(self.device)
+        if x.ndim != 4:
+            raise ValueError(
+                "LPIPS expects image tensors with shape [N, C, H, W]."
+            )
+        if x.shape[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+        elif x.shape[1] != 3:
+            raise ValueError("LPIPS supports only 1-channel or 3-channel inputs.")
+
+        return (x * 2.0) - 1.0
 
     def forward(
         self,
@@ -39,7 +62,7 @@ class L2(AbstractMetric):
         targets: torch.Tensor,
         **kwargs,
     ) -> None:
-        """Accumulate batch L2 statistics for split-level logging.
+        """Accumulate per-sample LPIPS values for a split.
 
         Args:
             generated_predictions: Model predictions.
@@ -53,16 +76,10 @@ class L2(AbstractMetric):
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
-        sq_error = (generated_predictions - targets) ** 2
-        sq_error = sq_error.reshape(sq_error.shape[0], -1)
-        per_sample_l2 = sq_error.mean(dim=1)
+        predictions_lpips = self._prepare_tensor(generated_predictions)
+        targets_lpips = self._prepare_tensor(targets)
 
-        self.total_squared_error += per_sample_l2.sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            per_sample_l2.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.lpips_metric.update(predictions_lpips, targets_lpips)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -71,26 +88,22 @@ class L2(AbstractMetric):
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
     def compute(self) -> torch.Tensor:
-        """Compute averaged L2 value for currently accumulated state.
+        """Compute averaged LPIPS for currently accumulated state.
 
         Returns:
-            Scalar tensor with current L2 value.
+            Scalar tensor with current LPIPS value.
         """
 
-        average_l2 = torch.where(
-            self.total_examples > 0,
-            self.total_squared_error / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        if not torch.isfinite(average_l2):
-            average_l2 = torch.tensor(0.0, device=self.device)
-        return average_l2
+        average_lpips = self.lpips_metric.compute().to(self.device)
+        if not torch.isfinite(average_lpips):
+            average_lpips = torch.tensor(0.0, device=self.device)
+        return average_lpips
 
     @property
     def metric_name(self) -> str:
         """Base metric key for logging."""
 
-        return "l2_total"
+        return "lpips_total"
 
     def get_metric_data(self) -> dict[str, float]:
         """Backward-compatible helper that computes and resets state."""
