@@ -34,7 +34,7 @@ class PSNR(AbstractMetric):
         )
         self.psnr_metric = PeakSignalNoiseRatio(
             data_range=max_pixel_value,
-            reduction="elementwise_mean",
+            reduction="none",
             dim=(1, 2, 3),
         ).to(self.device)
         self.reset()
@@ -43,6 +43,9 @@ class PSNR(AbstractMetric):
         """Reset running PSNR accumulators."""
 
         self.psnr_metric.reset()
+        self.total_psnr = torch.tensor(0.0, device=self.device)
+        self.total_psnr_sq = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
@@ -65,6 +68,20 @@ class PSNR(AbstractMetric):
             raise ValueError("The generated predictions and targets must be the same shape.")
 
         self.psnr_metric.update(generated_predictions, targets)
+        per_sample_psnr = self.psnr_metric.compute().to(self.device).reshape(-1)
+        self.psnr_metric.reset()
+        finite_psnr = torch.where(
+            torch.isfinite(per_sample_psnr),
+            per_sample_psnr,
+            torch.tensor(self.nonfinite_cap, device=self.device),
+        )
+        self.total_psnr += finite_psnr.sum().detach()
+        self.total_psnr_sq += finite_psnr.pow(2).sum().detach()
+        self.total_examples += torch.tensor(
+            finite_psnr.numel(),
+            dtype=torch.float32,
+            device=self.device,
+        )
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -72,17 +89,33 @@ class PSNR(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged PSNR for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged PSNR and population std for current state.
 
         Returns:
-            Scalar tensor with current PSNR value.
+            Dictionary containing mean and std metric values.
         """
 
-        average_psnr = self.psnr_metric.compute().to(self.device)
+        average_psnr = torch.where(
+            self.total_examples > 0,
+            self.total_psnr / self.total_examples,
+            torch.tensor(0.0, device=self.device),
+        )
+        variance_psnr = torch.where(
+            self.total_examples > 0,
+            (self.total_psnr_sq / self.total_examples) - average_psnr.pow(2),
+            torch.tensor(0.0, device=self.device),
+        )
+        std_psnr = torch.sqrt(torch.clamp(variance_psnr, min=0.0))
         if not torch.isfinite(average_psnr):
             average_psnr = torch.tensor(self.nonfinite_cap, device=self.device)
-        return average_psnr
+        if not torch.isfinite(std_psnr):
+            std_psnr = torch.tensor(0.0, device=self.device)
+
+        return {
+            self.metric_name: average_psnr.item(),
+            f"{self.metric_name}_std": std_psnr.item(),
+        }
 
     @property
     def metric_name(self) -> str:
@@ -91,8 +124,8 @@ class PSNR(AbstractMetric):
         return "psnr_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

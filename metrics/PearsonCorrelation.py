@@ -31,6 +31,7 @@ class PearsonCorrelation(AbstractMetric):
         """Reset running Pearson correlation accumulators."""
 
         self.total_pearson = torch.tensor(0.0, device=self.device)
+        self.total_pearson_sq = torch.tensor(0.0, device=self.device)
         self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
@@ -75,6 +76,7 @@ class PearsonCorrelation(AbstractMetric):
         )
 
         self.total_pearson += per_sample_pearson.sum().detach()
+        self.total_pearson_sq += per_sample_pearson.pow(2).sum().detach()
         self.total_examples += torch.tensor(
             per_sample_pearson.shape[0],
             dtype=torch.float32,
@@ -87,11 +89,11 @@ class PearsonCorrelation(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged Pearson correlation for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged Pearson and population std for current state.
 
         Returns:
-            Scalar tensor with current Pearson correlation value.
+            Dictionary containing mean and std metric values.
         """
 
         average_pearson = torch.where(
@@ -99,9 +101,21 @@ class PearsonCorrelation(AbstractMetric):
             self.total_pearson / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
+        variance_pearson = torch.where(
+            self.total_examples > 0,
+            (self.total_pearson_sq / self.total_examples) - average_pearson.pow(2),
+            torch.tensor(0.0, device=self.device),
+        )
+        std_pearson = torch.sqrt(torch.clamp(variance_pearson, min=0.0))
         if not torch.isfinite(average_pearson):
             average_pearson = torch.tensor(0.0, device=self.device)
-        return average_pearson
+        if not torch.isfinite(std_pearson):
+            std_pearson = torch.tensor(0.0, device=self.device)
+
+        return {
+            self.metric_name: average_pearson.item(),
+            f"{self.metric_name}_std": std_pearson.item(),
+        }
 
     @property
     def metric_name(self) -> str:
@@ -110,8 +124,8 @@ class PearsonCorrelation(AbstractMetric):
         return "pearson_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

@@ -77,17 +77,20 @@ class DISTS(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged DISTS for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged DISTS and std for current state.
 
         Returns:
-            Scalar tensor with current DISTS value.
+            Dictionary containing mean and std metric values.
         """
 
         average_dists = self.dists_metric.compute().to(self.device)
         if not torch.isfinite(average_dists):
             average_dists = torch.tensor(0.0, device=self.device)
-        return average_dists
+        return {
+            self.metric_name: average_dists.item(),
+            f"{self.metric_name}_std": 0.0,
+        }
 
     @property
     def metric_name(self) -> str:
@@ -96,8 +99,8 @@ class DISTS(AbstractMetric):
         return "dists_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

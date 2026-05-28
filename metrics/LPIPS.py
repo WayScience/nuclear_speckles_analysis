@@ -87,17 +87,20 @@ class LPIPS(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged LPIPS for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged LPIPS and std for current state.
 
         Returns:
-            Scalar tensor with current LPIPS value.
+            Dictionary containing mean and std metric values.
         """
 
         average_lpips = self.lpips_metric.compute().to(self.device)
         if not torch.isfinite(average_lpips):
             average_lpips = torch.tensor(0.0, device=self.device)
-        return average_lpips
+        return {
+            self.metric_name: average_lpips.item(),
+            f"{self.metric_name}_std": 0.0,
+        }
 
     @property
     def metric_name(self) -> str:
@@ -106,8 +109,8 @@ class LPIPS(AbstractMetric):
         return "lpips_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

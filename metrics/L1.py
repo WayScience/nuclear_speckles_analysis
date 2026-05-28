@@ -31,6 +31,7 @@ class L1(AbstractMetric):
         """Reset running L1 accumulators used for epoch-level logging."""
 
         self.total_abs_error = torch.tensor(0.0, device=self.device)
+        self.total_abs_error_sq = torch.tensor(0.0, device=self.device)
         self.total_examples = torch.tensor(0.0, device=self.device)
 
     def forward(
@@ -58,6 +59,7 @@ class L1(AbstractMetric):
         per_sample_l1 = abs_error.mean(dim=1)
 
         self.total_abs_error += per_sample_l1.sum().detach().to(self.device)
+        self.total_abs_error_sq += per_sample_l1.pow(2).sum().detach().to(self.device)
         self.total_examples += torch.tensor(
             per_sample_l1.numel(),
             dtype=torch.float32,
@@ -70,11 +72,11 @@ class L1(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged L1 value for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged L1 and population std for current state.
 
         Returns:
-            Scalar tensor with current L1 value.
+            Dictionary containing mean and std metric values.
         """
 
         average_l1 = torch.where(
@@ -82,9 +84,21 @@ class L1(AbstractMetric):
             self.total_abs_error / self.total_examples,
             torch.tensor(0.0, device=self.device),
         )
+        variance_l1 = torch.where(
+            self.total_examples > 0,
+            (self.total_abs_error_sq / self.total_examples) - average_l1.pow(2),
+            torch.tensor(0.0, device=self.device),
+        )
+        std_l1 = torch.sqrt(torch.clamp(variance_l1, min=0.0))
         if not torch.isfinite(average_l1):
             average_l1 = torch.tensor(0.0, device=self.device)
-        return average_l1
+        if not torch.isfinite(std_l1):
+            std_l1 = torch.tensor(0.0, device=self.device)
+
+        return {
+            self.metric_name: average_l1.item(),
+            f"{self.metric_name}_std": std_l1.item(),
+        }
 
     @property
     def metric_name(self) -> str:
@@ -93,8 +107,8 @@ class L1(AbstractMetric):
         return "l1_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data
