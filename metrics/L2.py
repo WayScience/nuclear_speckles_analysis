@@ -31,7 +31,7 @@ class L2(AbstractMetric):
         """Reset running squared-error accumulators."""
 
         self.total_squared_error = torch.tensor(0.0, device=self.device)
-        self.total_elements = torch.tensor(0.0, device=self.device)
+        self.total_samples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
@@ -54,9 +54,12 @@ class L2(AbstractMetric):
             raise ValueError("The generated predictions and targets must be the same shape.")
 
         sq_error = (generated_predictions - targets) ** 2
-        self.total_squared_error += sq_error.sum().detach().to(self.device)
-        self.total_elements += torch.tensor(
-            sq_error.numel(),
+        sq_error = sq_error.reshape(sq_error.shape[0], -1)
+        per_sample_l2 = sq_error.mean(dim=1)
+
+        self.total_squared_error += per_sample_l2.sum().detach().to(self.device)
+        self.total_samples += torch.tensor(
+            per_sample_l2.numel(),
             dtype=torch.float32,
             device=self.device,
         )
@@ -78,8 +81,8 @@ class L2(AbstractMetric):
         """
 
         average_l2 = torch.where(
-            self.total_elements > 0,
-            self.total_squared_error / self.total_elements,
+            self.total_samples > 0,
+            self.total_squared_error / self.total_samples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_l2):

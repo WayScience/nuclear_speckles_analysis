@@ -31,7 +31,7 @@ class L1(AbstractMetric):
         """Reset running L1 accumulators used for epoch-level logging."""
 
         self.total_abs_error = torch.tensor(0.0, device=self.device)
-        self.total_elements = torch.tensor(0.0, device=self.device)
+        self.total_samples = torch.tensor(0.0, device=self.device)
 
     def forward(
         self,
@@ -57,9 +57,12 @@ class L1(AbstractMetric):
             raise ValueError("The generated predictions and targets must be the same shape.")
 
         abs_error = torch.abs(generated_predictions - targets)
-        self.total_abs_error += abs_error.sum().detach().to(self.device)
-        self.total_elements += torch.tensor(
-            abs_error.numel(),
+        abs_error = abs_error.reshape(abs_error.shape[0], -1)
+        per_sample_l1 = abs_error.mean(dim=1)
+
+        self.total_abs_error += per_sample_l1.sum().detach().to(self.device)
+        self.total_samples += torch.tensor(
+            per_sample_l1.numel(),
             dtype=torch.float32,
             device=self.device,
         )
@@ -81,8 +84,8 @@ class L1(AbstractMetric):
         """
 
         average_l1 = torch.where(
-            self.total_elements > 0,
-            self.total_abs_error / self.total_elements,
+            self.total_samples > 0,
+            self.total_abs_error / self.total_samples,
             torch.tensor(0.0, device=self.device),
         )
         if not torch.isfinite(average_l1):
