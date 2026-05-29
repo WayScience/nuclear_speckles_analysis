@@ -6,6 +6,12 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
     """Generator loss combining L1 reconstruction and Wasserstein term."""
 
     def __init__(self, reconstruction_importance: float = 100.0) -> None:
+        """Configure weighting for the reconstruction component.
+
+        Args:
+            reconstruction_importance: Multiplier applied to mean L1 reconstruction loss.
+        """
+
         super().__init__()
         self.reconstruction_importance = reconstruction_importance
 
@@ -17,7 +23,23 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
         epoch: int = 0,
         **kwargs,
     ) -> torch.Tensor:
-        """Return Zamirski-style generator loss with epoch-weighted critic term."""
+        """Compute Zamirski-style generator objective for one batch.
+
+        Args:
+            fake_classification_outputs: Critic outputs for generated samples.
+            generated_predictions: Generator predictions.
+            targets: Ground-truth targets with matching shape.
+            epoch: Zero-based epoch index used to down-weight adversarial term over time.
+            **kwargs: Additional unused loss arguments.
+
+        Returns:
+            Scalar generator loss equal to
+            ``reconstruction_importance * L1(generated_predictions, targets) - mean(fake_classification_outputs) / (epoch + 1)``.
+
+        Raises:
+            ValueError: If prediction and target shapes differ.
+            ValueError: If critic output batch size does not match predictions batch size.
+        """
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("generated_predictions and targets must have the same shape.")

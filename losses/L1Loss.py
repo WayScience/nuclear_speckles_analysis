@@ -11,7 +11,19 @@ class L1Loss(nn.Module):
         targets: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        """Return mean L1 loss for backpropagation."""
+        """Compute mean L1 training loss for one batch.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            **kwargs: Additional unused loss arguments.
+
+        Returns:
+            Scalar mean absolute error used for optimization.
+
+        Raises:
+            ValueError: If prediction and target shapes differ.
+        """
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
