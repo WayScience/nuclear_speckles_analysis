@@ -29,7 +29,9 @@ class UNetTrainer:
         Args:
             model: Trainable image-to-image model.
             model_optimizer: Optimizer used for parameter updates.
-            model_loss: Loss module used for backpropagation.
+            model_loss: Loss module used for backpropagation. Must return
+                ``dict[str, torch.Tensor]`` with required scalar key
+                ``"total"`` and optional additional scalar components.
             train_dataloader: Training dataloader.
             val_dataloader: Validation dataloader used by callbacks.
             callbacks: Callback dispatcher used for hooks and logging.
@@ -53,6 +55,7 @@ class UNetTrainer:
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
         self.max_train_batches = max_train_batches
+        # Stable loss identifier used to namespace batch metrics in MLflow.
         self.loss_name = getattr(self.model_loss, "loss_name", self.model_loss.__class__.__name__)
 
         if self.use_amp:
@@ -70,7 +73,18 @@ class UNetTrainer:
         return self.callbacks.best_loss_value
 
     def train(self) -> None:
-        """Run the training loop with callback hooks and optional early stopping."""
+        """Run the training loop with callback hooks and optional early stopping.
+
+        The trainer enforces a strict loss output contract:
+        ``model_loss(...) -> dict[str, torch.Tensor]`` with required scalar key
+        ``"total"`` used for optimization.
+
+        At each batch end, callback hook data includes:
+            - ``model_update_loss``: Scalar tensor used for backward pass.
+            - ``batch_loss_name``: Stable loss identifier for metric naming.
+            - ``batch_loss_components``: Detached scalar loss components as
+              ``dict[str, float]`` for logging.
+        """
 
         train_data = {}
         train_data["continue_training"] = True

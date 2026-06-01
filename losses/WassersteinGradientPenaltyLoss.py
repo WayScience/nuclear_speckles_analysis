@@ -5,7 +5,7 @@ from torch import nn
 class WassersteinGradientPenaltyLoss(nn.Module):
     """WGAN-GP loss wrapper with trainer-compatible call signature."""
 
-    loss_name = "wasserstein_gp"
+    loss_name = "wasserstein_gp"  # Stable MLflow namespace for this loss family.
 
     def __init__(self, gradient_penalty_importance: float = 10.0) -> None:
         """Configure weighting for the gradient penalty term.

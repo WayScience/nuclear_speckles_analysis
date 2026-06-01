@@ -5,7 +5,7 @@ from torch import nn
 class L1Loss(nn.Module):
     """Training loss wrapper with trainer-compatible call signature."""
 
-    loss_name = "l1"
+    loss_name = "l1"  # Stable MLflow metric namespace for this loss family.
 
     def forward(
         self,
