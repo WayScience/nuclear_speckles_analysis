@@ -5,6 +5,8 @@ from torch import nn
 class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
     """Generator loss combining L1 reconstruction and Wasserstein term."""
 
+    loss_name = "wasserstein_generator"
+
     def __init__(self, reconstruction_importance: float = 100.0) -> None:
         """Configure weighting for the reconstruction component.
 

@@ -5,6 +5,8 @@ from torch import nn
 class L1Loss(nn.Module):
     """Training loss wrapper with trainer-compatible call signature."""
 
+    loss_name = "l1"
+
     def forward(
         self,
         generated_predictions: torch.Tensor,

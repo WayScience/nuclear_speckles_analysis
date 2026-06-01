@@ -53,6 +53,7 @@ class UNetTrainer:
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
         self.max_train_batches = max_train_batches
+        self.loss_name = getattr(self.model_loss, "loss_name", self.model_loss.__class__.__name__)
 
         if self.use_amp:
             if self.device.type == "cuda":
@@ -123,6 +124,7 @@ class UNetTrainer:
                 train_data["generated_predictions"] = generated_predictions
                 train_data["model_update_loss"] = loss
                 train_data["batch_loss_components"] = detached_loss_components
+                train_data["batch_loss_name"] = self.loss_name
 
                 self.model_optimizer.zero_grad()
                 if self.use_amp and self.scaler is not None:
