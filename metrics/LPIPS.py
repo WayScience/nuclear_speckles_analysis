@@ -1,7 +1,9 @@
 from typing import Literal, Union
 
 import torch
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics.functional.image.lpips import (
+    learned_perceptual_image_patch_similarity,
+)
 
 from .AbstractMetric import AbstractMetric
 
@@ -29,17 +31,14 @@ class LPIPS(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
-        self.lpips_metric = LearnedPerceptualImagePatchSimilarity(
-            net_type=self.net,
-            reduction="mean",
-            normalize=False,
-        ).to(self.device)
         self.reset()
 
     def reset(self):
         """Reset running LPIPS accumulators."""
 
-        self.lpips_metric.reset()
+        self.total_lpips = torch.tensor(0.0, device=self.device)
+        self.total_lpips_sq = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """Prepare image tensor for LPIPS input conventions."""
@@ -79,7 +78,20 @@ class LPIPS(AbstractMetric):
         predictions_lpips = self._prepare_tensor(generated_predictions)
         targets_lpips = self._prepare_tensor(targets)
 
-        self.lpips_metric.update(predictions_lpips, targets_lpips)
+        per_sample_lpips = learned_perceptual_image_patch_similarity(
+            predictions_lpips,
+            targets_lpips,
+            net_type=self.net,
+            reduction="none",
+            normalize=False,
+        ).reshape(-1)
+        self.total_lpips += per_sample_lpips.sum().detach().to(self.device)
+        self.total_lpips_sq += per_sample_lpips.pow(2).sum().detach().to(self.device)
+        self.total_examples += torch.tensor(
+            per_sample_lpips.numel(),
+            dtype=torch.float32,
+            device=self.device,
+        )
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -88,18 +100,30 @@ class LPIPS(AbstractMetric):
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
     def compute(self) -> dict[str, float]:
-        """Compute averaged LPIPS and std for current state.
+        """Compute averaged LPIPS and population std for current state.
 
         Returns:
             Dictionary containing mean and std metric values.
         """
 
-        average_lpips = self.lpips_metric.compute().to(self.device)
+        average_lpips = torch.where(
+            self.total_examples > 0,
+            self.total_lpips / self.total_examples,
+            torch.tensor(0.0, device=self.device),
+        )
+        variance_lpips = torch.where(
+            self.total_examples > 0,
+            (self.total_lpips_sq / self.total_examples) - average_lpips.pow(2),
+            torch.tensor(0.0, device=self.device),
+        )
+        std_lpips = torch.sqrt(torch.clamp(variance_lpips, min=0.0))
         if not torch.isfinite(average_lpips):
             average_lpips = torch.tensor(0.0, device=self.device)
+        if not torch.isfinite(std_lpips):
+            std_lpips = torch.tensor(0.0, device=self.device)
         return {
             self.metric_name: average_lpips.item(),
-            f"{self.metric_name}_std": 0.0,
+            f"{self.metric_name}_std": std_lpips.item(),
         }
 
     @property

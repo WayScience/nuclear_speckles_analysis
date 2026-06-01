@@ -1,7 +1,9 @@
 from typing import Union
 
 import torch
-from torchmetrics.image import DeepImageStructureAndTextureSimilarity
+from torchmetrics.functional.image.dists import (
+    deep_image_structure_and_texture_similarity,
+)
 
 from .AbstractMetric import AbstractMetric
 
@@ -26,15 +28,14 @@ class DISTS(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
-        self.dists_metric = DeepImageStructureAndTextureSimilarity(reduction="mean").to(
-            self.device
-        )
         self.reset()
 
     def reset(self):
         """Reset running DISTS accumulators."""
 
-        self.dists_metric.reset()
+        self.total_dists = torch.tensor(0.0, device=self.device)
+        self.total_dists_sq = torch.tensor(0.0, device=self.device)
+        self.total_examples = torch.tensor(0.0, device=self.device)
 
     def _to_three_channels(self, tensor: torch.Tensor) -> torch.Tensor:
         """Convert grayscale tensors to 3-channel tensors for DISTS."""
@@ -69,7 +70,18 @@ class DISTS(AbstractMetric):
 
         preds_rgb = self._to_three_channels(generated_predictions)
         targets_rgb = self._to_three_channels(targets)
-        self.dists_metric.update(preds_rgb, targets_rgb)
+        per_sample_dists = deep_image_structure_and_texture_similarity(
+            preds_rgb,
+            targets_rgb,
+            reduction="none",
+        ).reshape(-1)
+        self.total_dists += per_sample_dists.sum().detach().to(self.device)
+        self.total_dists_sq += per_sample_dists.pow(2).sum().detach().to(self.device)
+        self.total_examples += torch.tensor(
+            per_sample_dists.numel(),
+            dtype=torch.float32,
+            device=self.device,
+        )
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -78,18 +90,30 @@ class DISTS(AbstractMetric):
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
     def compute(self) -> dict[str, float]:
-        """Compute averaged DISTS and std for current state.
+        """Compute averaged DISTS and population std for current state.
 
         Returns:
             Dictionary containing mean and std metric values.
         """
 
-        average_dists = self.dists_metric.compute().to(self.device)
+        average_dists = torch.where(
+            self.total_examples > 0,
+            self.total_dists / self.total_examples,
+            torch.tensor(0.0, device=self.device),
+        )
+        variance_dists = torch.where(
+            self.total_examples > 0,
+            (self.total_dists_sq / self.total_examples) - average_dists.pow(2),
+            torch.tensor(0.0, device=self.device),
+        )
+        std_dists = torch.sqrt(torch.clamp(variance_dists, min=0.0))
         if not torch.isfinite(average_dists):
             average_dists = torch.tensor(0.0, device=self.device)
+        if not torch.isfinite(std_dists):
+            std_dists = torch.tensor(0.0, device=self.device)
         return {
             self.metric_name: average_dists.item(),
-            f"{self.metric_name}_std": 0.0,
+            f"{self.metric_name}_std": std_dists.item(),
         }
 
     @property
