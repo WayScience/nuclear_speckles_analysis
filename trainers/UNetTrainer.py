@@ -97,14 +97,32 @@ class UNetTrainer:
                     enabled=self.use_amp, device_type=self.device.type
                 ):
                     generated_predictions = self.image_postprocessor(self.model(inputs))
-                    loss = self.model_loss(
+                    batch_loss_components = self.model_loss(
                         targets=targets,
                         generated_predictions=generated_predictions,
                         loss_mask=batch_data.get("loss_mask"),
                     )
 
+                if not isinstance(batch_loss_components, dict):
+                    raise TypeError("model_loss must return dict[str, torch.Tensor].")
+                if "total" not in batch_loss_components:
+                    raise ValueError("model_loss output must include a 'total' key.")
+
+                loss = batch_loss_components["total"]
+                if not torch.is_tensor(loss) or loss.ndim != 0:
+                    raise ValueError("model_loss['total'] must be a scalar torch.Tensor.")
+
+                detached_loss_components: dict[str, float] = {}
+                for name, value in batch_loss_components.items():
+                    if not torch.is_tensor(value) or value.ndim != 0:
+                        raise ValueError(
+                            f"model_loss['{name}'] must be a scalar torch.Tensor."
+                        )
+                    detached_loss_components[name] = value.detach().item()
+
                 train_data["generated_predictions"] = generated_predictions
                 train_data["model_update_loss"] = loss
+                train_data["batch_loss_components"] = detached_loss_components
 
                 self.model_optimizer.zero_grad()
                 if self.use_amp and self.scaler is not None:

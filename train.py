@@ -102,6 +102,7 @@ parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
+parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 args = parser.parse_args()
 
@@ -308,6 +309,7 @@ callbacks_args = {
         else None
     ),
     "image_postprocessor": image_postprocessor,
+    "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
 }
 

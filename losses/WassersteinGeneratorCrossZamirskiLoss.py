@@ -22,7 +22,7 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
         targets: torch.Tensor,
         epoch: int = 0,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Compute Zamirski-style generator objective for one batch.
 
         Args:
@@ -33,8 +33,8 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
             **kwargs: Additional unused loss arguments.
 
         Returns:
-            Scalar generator loss equal to
-            ``reconstruction_importance * L1(generated_predictions, targets) - mean(fake_classification_outputs) / (epoch + 1)``.
+            Dictionary with scalar generator loss under ``total`` plus
+            reconstruction and adversarial components.
 
         Raises:
             ValueError: If prediction and target shapes differ.
@@ -54,4 +54,9 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
             generated_predictions, targets, reduction="mean"
         )
         adversarial_term = torch.mean(fake_classification_outputs) / (epoch + 1)
-        return self.reconstruction_importance * reconstruction_loss - adversarial_term
+        total = self.reconstruction_importance * reconstruction_loss - adversarial_term
+        return {
+            "total": total,
+            "reconstruction": reconstruction_loss,
+            "adversarial": adversarial_term,
+        }

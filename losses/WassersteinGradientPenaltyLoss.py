@@ -21,7 +21,7 @@ class WassersteinGradientPenaltyLoss(nn.Module):
         real_classification_outputs: torch.Tensor,
         fake_classification_outputs: torch.Tensor,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Compute critic loss with Wasserstein distance and gradient penalty.
 
         Args:
@@ -31,8 +31,8 @@ class WassersteinGradientPenaltyLoss(nn.Module):
             **kwargs: Additional unused loss arguments.
 
         Returns:
-            Scalar critic loss equal to
-            ``mean(fake_classification_outputs) - mean(real_classification_outputs) + gradient_penalty_importance * penalty``.
+            Dictionary with scalar critic loss under ``total`` plus
+            Wasserstein and gradient-penalty components.
 
         Raises:
             ValueError: If real critic output batch size does not match gradients batch size.
@@ -47,8 +47,12 @@ class WassersteinGradientPenaltyLoss(nn.Module):
 
         gradients = gradients.view(batch_size, -1)
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-        return (
-            torch.mean(fake_classification_outputs)
-            - torch.mean(real_classification_outputs)
-            + gradient_penalty * self.gradient_penalty_importance
+        wasserstein = torch.mean(fake_classification_outputs) - torch.mean(
+            real_classification_outputs
         )
+        total = wasserstein + gradient_penalty * self.gradient_penalty_importance
+        return {
+            "total": total,
+            "wasserstein": wasserstein,
+            "gradient_penalty": gradient_penalty,
+        }
