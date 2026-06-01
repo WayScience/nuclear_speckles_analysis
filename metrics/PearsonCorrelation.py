@@ -3,6 +3,7 @@ from typing import Union
 import torch
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class PearsonCorrelation(AbstractMetric):
@@ -30,9 +31,7 @@ class PearsonCorrelation(AbstractMetric):
     def reset(self):
         """Reset running Pearson correlation accumulators."""
 
-        self.total_pearson = torch.tensor(0.0, device=self.device)
-        self.total_pearson_sq = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def forward(
         self,
@@ -75,13 +74,7 @@ class PearsonCorrelation(AbstractMetric):
             torch.tensor(0.0, device=self.device),
         )
 
-        self.total_pearson += per_sample_pearson.sum().detach()
-        self.total_pearson_sq += per_sample_pearson.pow(2).sum().detach()
-        self.total_examples += torch.tensor(
-            per_sample_pearson.shape[0],
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(per_sample_pearson)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -96,25 +89,11 @@ class PearsonCorrelation(AbstractMetric):
             Dictionary containing mean and std metric values.
         """
 
-        average_pearson = torch.where(
-            self.total_examples > 0,
-            self.total_pearson / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        variance_pearson = torch.where(
-            self.total_examples > 0,
-            (self.total_pearson_sq / self.total_examples) - average_pearson.pow(2),
-            torch.tensor(0.0, device=self.device),
-        )
-        std_pearson = torch.sqrt(torch.clamp(variance_pearson, min=0.0))
-        if not torch.isfinite(average_pearson):
-            average_pearson = torch.tensor(0.0, device=self.device)
-        if not torch.isfinite(std_pearson):
-            std_pearson = torch.tensor(0.0, device=self.device)
+        stats = self.stats.compute()
 
         return {
-            self.metric_name: average_pearson.item(),
-            f"{self.metric_name}_std": std_pearson.item(),
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
         }
 
     @property

@@ -6,6 +6,7 @@ from torchmetrics.functional.image.lpips import (
 )
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class LPIPS(AbstractMetric):
@@ -36,9 +37,7 @@ class LPIPS(AbstractMetric):
     def reset(self):
         """Reset running LPIPS accumulators."""
 
-        self.total_lpips = torch.tensor(0.0, device=self.device)
-        self.total_lpips_sq = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """Prepare image tensor for LPIPS input conventions."""
@@ -85,13 +84,7 @@ class LPIPS(AbstractMetric):
             reduction="none",
             normalize=False,
         ).reshape(-1)
-        self.total_lpips += per_sample_lpips.sum().detach().to(self.device)
-        self.total_lpips_sq += per_sample_lpips.pow(2).sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            per_sample_lpips.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(per_sample_lpips)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -106,24 +99,10 @@ class LPIPS(AbstractMetric):
             Dictionary containing mean and std metric values.
         """
 
-        average_lpips = torch.where(
-            self.total_examples > 0,
-            self.total_lpips / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        variance_lpips = torch.where(
-            self.total_examples > 0,
-            (self.total_lpips_sq / self.total_examples) - average_lpips.pow(2),
-            torch.tensor(0.0, device=self.device),
-        )
-        std_lpips = torch.sqrt(torch.clamp(variance_lpips, min=0.0))
-        if not torch.isfinite(average_lpips):
-            average_lpips = torch.tensor(0.0, device=self.device)
-        if not torch.isfinite(std_lpips):
-            std_lpips = torch.tensor(0.0, device=self.device)
+        stats = self.stats.compute()
         return {
-            self.metric_name: average_lpips.item(),
-            f"{self.metric_name}_std": std_lpips.item(),
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
         }
 
     @property

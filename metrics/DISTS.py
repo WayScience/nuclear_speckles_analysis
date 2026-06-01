@@ -6,6 +6,7 @@ from torchmetrics.functional.image.dists import (
 )
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class DISTS(AbstractMetric):
@@ -33,9 +34,7 @@ class DISTS(AbstractMetric):
     def reset(self):
         """Reset running DISTS accumulators."""
 
-        self.total_dists = torch.tensor(0.0, device=self.device)
-        self.total_dists_sq = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def _to_three_channels(self, tensor: torch.Tensor) -> torch.Tensor:
         """Convert grayscale tensors to 3-channel tensors for DISTS."""
@@ -75,13 +74,7 @@ class DISTS(AbstractMetric):
             targets_rgb,
             reduction="none",
         ).reshape(-1)
-        self.total_dists += per_sample_dists.sum().detach().to(self.device)
-        self.total_dists_sq += per_sample_dists.pow(2).sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            per_sample_dists.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(per_sample_dists)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -96,24 +89,10 @@ class DISTS(AbstractMetric):
             Dictionary containing mean and std metric values.
         """
 
-        average_dists = torch.where(
-            self.total_examples > 0,
-            self.total_dists / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        variance_dists = torch.where(
-            self.total_examples > 0,
-            (self.total_dists_sq / self.total_examples) - average_dists.pow(2),
-            torch.tensor(0.0, device=self.device),
-        )
-        std_dists = torch.sqrt(torch.clamp(variance_dists, min=0.0))
-        if not torch.isfinite(average_dists):
-            average_dists = torch.tensor(0.0, device=self.device)
-        if not torch.isfinite(std_dists):
-            std_dists = torch.tensor(0.0, device=self.device)
+        stats = self.stats.compute()
         return {
-            self.metric_name: average_dists.item(),
-            f"{self.metric_name}_std": std_dists.item(),
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
         }
 
     @property

@@ -3,6 +3,7 @@ from typing import Union
 import torch
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class L1(AbstractMetric):
@@ -30,9 +31,7 @@ class L1(AbstractMetric):
     def reset(self):
         """Reset running L1 accumulators used for epoch-level logging."""
 
-        self.total_abs_error = torch.tensor(0.0, device=self.device)
-        self.total_abs_error_sq = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def forward(
         self,
@@ -58,13 +57,7 @@ class L1(AbstractMetric):
         abs_error = abs_error.reshape(abs_error.shape[0], -1)
         per_sample_l1 = abs_error.mean(dim=1)
 
-        self.total_abs_error += per_sample_l1.sum().detach().to(self.device)
-        self.total_abs_error_sq += per_sample_l1.pow(2).sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            per_sample_l1.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(per_sample_l1)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -79,25 +72,11 @@ class L1(AbstractMetric):
             Dictionary containing mean and std metric values.
         """
 
-        average_l1 = torch.where(
-            self.total_examples > 0,
-            self.total_abs_error / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        variance_l1 = torch.where(
-            self.total_examples > 0,
-            (self.total_abs_error_sq / self.total_examples) - average_l1.pow(2),
-            torch.tensor(0.0, device=self.device),
-        )
-        std_l1 = torch.sqrt(torch.clamp(variance_l1, min=0.0))
-        if not torch.isfinite(average_l1):
-            average_l1 = torch.tensor(0.0, device=self.device)
-        if not torch.isfinite(std_l1):
-            std_l1 = torch.tensor(0.0, device=self.device)
+        stats = self.stats.compute()
 
         return {
-            self.metric_name: average_l1.item(),
-            f"{self.metric_name}_std": std_l1.item(),
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
         }
 
     @property

@@ -4,6 +4,7 @@ import torch
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class SSIM(AbstractMetric):
@@ -39,9 +40,7 @@ class SSIM(AbstractMetric):
         """Reset running SSIM accumulators."""
 
         self.ssim_metric.reset()
-        self.total_ssim = torch.tensor(0.0, device=self.device)
-        self.total_ssim_sq = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def forward(
         self,
@@ -71,13 +70,7 @@ class SSIM(AbstractMetric):
             per_sample_ssim,
             torch.tensor(0.0, device=self.device),
         )
-        self.total_ssim += finite_ssim.sum().detach()
-        self.total_ssim_sq += finite_ssim.pow(2).sum().detach()
-        self.total_examples += torch.tensor(
-            finite_ssim.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(finite_ssim)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -92,25 +85,11 @@ class SSIM(AbstractMetric):
             Dictionary containing mean and std metric values.
         """
 
-        average_ssim = torch.where(
-            self.total_examples > 0,
-            self.total_ssim / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        variance_ssim = torch.where(
-            self.total_examples > 0,
-            (self.total_ssim_sq / self.total_examples) - average_ssim.pow(2),
-            torch.tensor(0.0, device=self.device),
-        )
-        std_ssim = torch.sqrt(torch.clamp(variance_ssim, min=0.0))
-        if not torch.isfinite(average_ssim):
-            average_ssim = torch.tensor(0.0, device=self.device)
-        if not torch.isfinite(std_ssim):
-            std_ssim = torch.tensor(0.0, device=self.device)
+        stats = self.stats.compute()
 
         return {
-            self.metric_name: average_ssim.item(),
-            f"{self.metric_name}_std": std_ssim.item(),
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
         }
 
     @property
