@@ -1,9 +1,12 @@
 from typing import Union
 
 import torch
-from torchmetrics.image import DeepImageStructureAndTextureSimilarity
+from torchmetrics.functional.image.dists import (
+    deep_image_structure_and_texture_similarity,
+)
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class DISTS(AbstractMetric):
@@ -26,15 +29,12 @@ class DISTS(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
-        self.dists_metric = DeepImageStructureAndTextureSimilarity(reduction="mean").to(
-            self.device
-        )
         self.reset()
 
     def reset(self):
         """Reset running DISTS accumulators."""
 
-        self.dists_metric.reset()
+        self.stats = StreamingScalarStats(device=self.device)
 
     def _to_three_channels(self, tensor: torch.Tensor) -> torch.Tensor:
         """Convert grayscale tensors to 3-channel tensors for DISTS."""
@@ -69,7 +69,12 @@ class DISTS(AbstractMetric):
 
         preds_rgb = self._to_three_channels(generated_predictions)
         targets_rgb = self._to_three_channels(targets)
-        self.dists_metric.update(preds_rgb, targets_rgb)
+        per_sample_dists = deep_image_structure_and_texture_similarity(
+            preds_rgb,
+            targets_rgb,
+            reduction="none",
+        ).reshape(-1)
+        self.stats.update(per_sample_dists)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -77,17 +82,18 @@ class DISTS(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged DISTS for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged DISTS and population std for current state.
 
         Returns:
-            Scalar tensor with current DISTS value.
+            Dictionary containing mean and std metric values.
         """
 
-        average_dists = self.dists_metric.compute().to(self.device)
-        if not torch.isfinite(average_dists):
-            average_dists = torch.tensor(0.0, device=self.device)
-        return average_dists
+        stats = self.stats.compute()
+        return {
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
+        }
 
     @property
     def metric_name(self) -> str:
@@ -96,8 +102,8 @@ class DISTS(AbstractMetric):
         return "dists_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

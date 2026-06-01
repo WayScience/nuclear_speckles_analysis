@@ -3,6 +3,7 @@ from typing import Union
 import torch
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class L2(AbstractMetric):
@@ -30,8 +31,7 @@ class L2(AbstractMetric):
     def reset(self):
         """Reset running squared-error accumulators."""
 
-        self.total_squared_error = torch.tensor(0.0, device=self.device)
-        self.total_examples = torch.tensor(0.0, device=self.device)
+        self.stats = StreamingScalarStats(device=self.device)
 
     def forward(
         self,
@@ -57,12 +57,7 @@ class L2(AbstractMetric):
         sq_error = sq_error.reshape(sq_error.shape[0], -1)
         per_sample_l2 = sq_error.mean(dim=1)
 
-        self.total_squared_error += per_sample_l2.sum().detach().to(self.device)
-        self.total_examples += torch.tensor(
-            per_sample_l2.numel(),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        self.stats.update(per_sample_l2)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -70,21 +65,19 @@ class L2(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged L2 value for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged L2 and population std for current state.
 
         Returns:
-            Scalar tensor with current L2 value.
+            Dictionary containing mean and std metric values.
         """
 
-        average_l2 = torch.where(
-            self.total_examples > 0,
-            self.total_squared_error / self.total_examples,
-            torch.tensor(0.0, device=self.device),
-        )
-        if not torch.isfinite(average_l2):
-            average_l2 = torch.tensor(0.0, device=self.device)
-        return average_l2
+        stats = self.stats.compute()
+
+        return {
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
+        }
 
     @property
     def metric_name(self) -> str:
@@ -93,8 +86,8 @@ class L2(AbstractMetric):
         return "l2_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

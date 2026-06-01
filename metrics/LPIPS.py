@@ -1,9 +1,12 @@
 from typing import Literal, Union
 
 import torch
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics.functional.image.lpips import (
+    learned_perceptual_image_patch_similarity,
+)
 
 from .AbstractMetric import AbstractMetric
+from .utils.streaming_stats import StreamingScalarStats
 
 
 class LPIPS(AbstractMetric):
@@ -29,17 +32,12 @@ class LPIPS(AbstractMetric):
         self.device = (
             device if isinstance(device, torch.device) else torch.device(device)
         )
-        self.lpips_metric = LearnedPerceptualImagePatchSimilarity(
-            net_type=self.net,
-            reduction="mean",
-            normalize=False,
-        ).to(self.device)
         self.reset()
 
     def reset(self):
         """Reset running LPIPS accumulators."""
 
-        self.lpips_metric.reset()
+        self.stats = StreamingScalarStats(device=self.device)
 
     def _prepare_tensor(self, x: torch.Tensor) -> torch.Tensor:
         """Prepare image tensor for LPIPS input conventions."""
@@ -79,7 +77,14 @@ class LPIPS(AbstractMetric):
         predictions_lpips = self._prepare_tensor(generated_predictions)
         targets_lpips = self._prepare_tensor(targets)
 
-        self.lpips_metric.update(predictions_lpips, targets_lpips)
+        per_sample_lpips = learned_perceptual_image_patch_similarity(
+            predictions_lpips,
+            targets_lpips,
+            net_type=self.net,
+            reduction="none",
+            normalize=False,
+        ).reshape(-1)
+        self.stats.update(per_sample_lpips)
         return None
 
     def update(self, generated_predictions: torch.Tensor, targets: torch.Tensor, **kwargs) -> None:
@@ -87,17 +92,18 @@ class LPIPS(AbstractMetric):
 
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
-    def compute(self) -> torch.Tensor:
-        """Compute averaged LPIPS for currently accumulated state.
+    def compute(self) -> dict[str, float]:
+        """Compute averaged LPIPS and population std for current state.
 
         Returns:
-            Scalar tensor with current LPIPS value.
+            Dictionary containing mean and std metric values.
         """
 
-        average_lpips = self.lpips_metric.compute().to(self.device)
-        if not torch.isfinite(average_lpips):
-            average_lpips = torch.tensor(0.0, device=self.device)
-        return average_lpips
+        stats = self.stats.compute()
+        return {
+            self.metric_name: stats["mean"],
+            f"{self.metric_name}_std": stats["std"],
+        }
 
     @property
     def metric_name(self) -> str:
@@ -106,8 +112,8 @@ class LPIPS(AbstractMetric):
         return "lpips_total"
 
     def get_metric_data(self) -> dict[str, float]:
-        """Backward-compatible helper that computes and resets state."""
+        """Compute metric stats and reset state."""
 
-        metric_data = {self.metric_name: self.compute().item()}
+        metric_data = self.compute()
         self.reset()
         return metric_data

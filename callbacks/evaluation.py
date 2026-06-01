@@ -105,12 +105,16 @@ class EpochEvaluatorCallback(BaseCallback):
                 ):
                     break
 
+        loss_metric_data = self.loss.compute()
         split_metric_data = {
-            f"{self.loss.metric_name}_{data_split}": self.loss.compute().item(),
+            f"{metric_name}_{data_split}": metric_value
+            for metric_name, metric_value in loss_metric_data.items()
         }
         self.loss.reset()
         for metric in self.metrics:
-            split_metric_data[f"{metric.metric_name}_{data_split}"] = metric.compute().item()
+            metric_data = metric.compute()
+            for metric_name, metric_value in metric_data.items():
+                split_metric_data[f"{metric_name}_{data_split}"] = metric_value
             metric.reset()
 
         return split_metric_data

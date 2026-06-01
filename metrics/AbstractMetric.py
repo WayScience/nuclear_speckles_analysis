@@ -21,8 +21,8 @@ class AbstractMetric(nn.Module, ABC):
         pass
 
     @abstractmethod
-    def compute(self) -> torch.Tensor:
-        """Compute the current aggregated metric value without resetting state."""
+    def compute(self) -> dict[str, float]:
+        """Compute current aggregated metric stats without resetting state."""
 
         pass
 
