@@ -235,6 +235,7 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 mlflow.set_tag("mlflow.note.content", description)
 
 # Build or reuse cropped-nuclei cache so training does not repeatedly parse raw image files.
+# When crop_size changes, delete the existing crop and tensor caches before rerunning.
 cache_result = ensure_dapi_to_gold_cache(
     image_dir=image_dir,
     parquet_path=parquet_path,
