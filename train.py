@@ -155,7 +155,7 @@ class OptimizationManager:
         """
 
         # Let Optuna choose a mini-batch size and learning rate for this trial.
-        batch_size = trial.suggest_int("batch_size", 8, 32)
+        batch_size = trial.suggest_int("batch_size", 1, 8)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
 
         # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
