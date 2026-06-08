@@ -29,7 +29,9 @@ class UNetTrainer:
         Args:
             model: Trainable image-to-image model.
             model_optimizer: Optimizer used for parameter updates.
-            model_loss: Loss module used for backpropagation.
+            model_loss: Loss module used for backpropagation. Must return
+                ``dict[str, torch.Tensor]`` with required scalar key
+                ``"total"`` and optional additional scalar components.
             train_dataloader: Training dataloader.
             val_dataloader: Validation dataloader used by callbacks.
             callbacks: Callback dispatcher used for hooks and logging.
@@ -53,6 +55,8 @@ class UNetTrainer:
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
         self.max_train_batches = max_train_batches
+        # Stable loss identifier used to namespace batch metrics in MLflow.
+        self.loss_name = getattr(self.model_loss, "loss_name", self.model_loss.__class__.__name__)
 
         if self.use_amp:
             if self.device.type == "cuda":
@@ -69,7 +73,18 @@ class UNetTrainer:
         return self.callbacks.best_loss_value
 
     def train(self) -> None:
-        """Run the training loop with callback hooks and optional early stopping."""
+        """Run the training loop with callback hooks and optional early stopping.
+
+        The trainer enforces a strict loss output contract:
+        ``model_loss(...) -> dict[str, torch.Tensor]`` with required scalar key
+        ``"total"`` used for optimization.
+
+        At each batch end, callback hook data includes:
+            - ``model_update_loss``: Scalar tensor used for backward pass.
+            - ``batch_loss_name``: Stable loss identifier for metric naming.
+            - ``batch_loss_components``: Detached scalar loss components as
+              ``dict[str, float]`` for logging.
+        """
 
         train_data = {}
         train_data["continue_training"] = True
@@ -97,14 +112,33 @@ class UNetTrainer:
                     enabled=self.use_amp, device_type=self.device.type
                 ):
                     generated_predictions = self.image_postprocessor(self.model(inputs))
-                    loss = self.model_loss(
+                    batch_loss_components = self.model_loss(
                         targets=targets,
                         generated_predictions=generated_predictions,
                         loss_mask=batch_data.get("loss_mask"),
                     )
 
+                if not isinstance(batch_loss_components, dict):
+                    raise TypeError("model_loss must return dict[str, torch.Tensor].")
+                if "total" not in batch_loss_components:
+                    raise ValueError("model_loss output must include a 'total' key.")
+
+                loss = batch_loss_components["total"]
+                if not torch.is_tensor(loss) or loss.ndim != 0:
+                    raise ValueError("model_loss['total'] must be a scalar torch.Tensor.")
+
+                detached_loss_components: dict[str, float] = {}
+                for name, value in batch_loss_components.items():
+                    if not torch.is_tensor(value) or value.ndim != 0:
+                        raise ValueError(
+                            f"model_loss['{name}'] must be a scalar torch.Tensor."
+                        )
+                    detached_loss_components[name] = value.detach().item()
+
                 train_data["generated_predictions"] = generated_predictions
                 train_data["model_update_loss"] = loss
+                train_data["batch_loss_components"] = detached_loss_components
+                train_data["batch_loss_name"] = self.loss_name
 
                 self.model_optimizer.zero_grad()
                 if self.use_amp and self.scaler is not None:

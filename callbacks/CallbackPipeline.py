@@ -3,6 +3,7 @@ from typing import Any, List, Optional, Union
 from torch.nn import Module
 
 from callbacks.base import Callback
+from callbacks.batch_logging import BatchLossMlflowLoggerCallback
 from callbacks.early_stopping import EarlyStoppingAndCheckpointCallback
 from callbacks.evaluation import EpochEvaluatorCallback
 from callbacks.image_saving import ImageSaverCallback
@@ -46,6 +47,7 @@ class CallbackPipeline:
         image_savers: Optional[Union[Any, List[Any]]] = None,
         image_postprocessor: Any = lambda x: x,
         batch_log_every_n: int = 50,
+        batch_metric_log_every_n: int = 1,
         max_eval_batches: int | None = None,
     ) -> None:
         """Initialize composed callbacks used during training.
@@ -57,9 +59,13 @@ class CallbackPipeline:
             image_savers: Optional saver callable or list of saver callables.
             image_postprocessor: Postprocessor applied when needed before logging.
             batch_log_every_n: Batch interval for progress logging.
+            batch_metric_log_every_n: Batch interval for MLflow batch loss metrics.
             max_eval_batches: Optional cap on batches during callback evaluation.
         """
         self.progress = ProgressLoggerCallback(batch_log_every_n=batch_log_every_n)
+        self.batch_logger = BatchLossMlflowLoggerCallback(
+            batch_metric_log_every_n=batch_metric_log_every_n
+        )
         self.evaluator = EpochEvaluatorCallback(
             metrics=metrics,
             loss=loss,
@@ -77,6 +83,7 @@ class CallbackPipeline:
             callbacks=[
                 # Keep evaluation before logging so aggregate values are current.
                 self.progress,
+                self.batch_logger,
                 self.evaluator,
                 self.metrics_logger,
                 # Image saving uses epoch/model but is independent of loss updates.

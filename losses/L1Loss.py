@@ -5,12 +5,14 @@ from torch import nn
 class L1Loss(nn.Module):
     """Training loss wrapper with trainer-compatible call signature."""
 
+    loss_name = "l1"  # Stable MLflow metric namespace for this loss family.
+
     def forward(
         self,
         generated_predictions: torch.Tensor,
         targets: torch.Tensor,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Compute mean L1 training loss for one batch.
 
         Args:
@@ -19,7 +21,7 @@ class L1Loss(nn.Module):
             **kwargs: Additional unused loss arguments.
 
         Returns:
-            Scalar mean absolute error used for optimization.
+            Dictionary with scalar mean absolute error under ``total``.
 
         Raises:
             ValueError: If prediction and target shapes differ.
@@ -27,4 +29,5 @@ class L1Loss(nn.Module):
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
-        return torch.nn.functional.l1_loss(generated_predictions, targets, reduction="mean")
+        total = torch.nn.functional.l1_loss(generated_predictions, targets, reduction="mean")
+        return {"total": total}
