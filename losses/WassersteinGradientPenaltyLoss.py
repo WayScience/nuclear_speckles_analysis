@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 
+from trainers.utils.wgan_gp import compute_wgan_gp_terms
+
 
 class WassersteinGradientPenaltyLoss(nn.Module):
     """WGAN-GP loss wrapper with trainer-compatible call signature."""
@@ -19,17 +21,17 @@ class WassersteinGradientPenaltyLoss(nn.Module):
 
     def forward(
         self,
-        gradients: torch.Tensor,
-        real_classification_outputs: torch.Tensor,
-        fake_classification_outputs: torch.Tensor,
+        critic: nn.Module,
+        real_samples: torch.Tensor,
+        fake_samples: torch.Tensor,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute critic loss with Wasserstein distance and gradient penalty.
 
         Args:
-            gradients: Gradients of critic outputs w.r.t. interpolated inputs.
-            real_classification_outputs: Critic outputs for real samples.
-            fake_classification_outputs: Critic outputs for generated samples.
+            critic: Critic network used to score real/fake samples.
+            real_samples: Real target samples.
+            fake_samples: Generated samples.
             **kwargs: Additional unused loss arguments.
 
         Returns:
@@ -41,17 +43,13 @@ class WassersteinGradientPenaltyLoss(nn.Module):
             ValueError: If fake critic output batch size does not match gradients batch size.
         """
 
-        batch_size = gradients.size(0)
-        if real_classification_outputs.size(0) != batch_size:
-            raise ValueError("real_classification_outputs batch size must match gradients.")
-        if fake_classification_outputs.size(0) != batch_size:
-            raise ValueError("fake_classification_outputs batch size must match gradients.")
-
-        gradients = gradients.view(batch_size, -1)
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-        wasserstein = torch.mean(fake_classification_outputs) - torch.mean(
-            real_classification_outputs
+        components = compute_wgan_gp_terms(
+            critic=critic,
+            real_samples=real_samples,
+            fake_samples=fake_samples,
         )
+        gradient_penalty = components["gradient_penalty_unweighted"]
+        wasserstein = components["wasserstein_term"]
         total = wasserstein + gradient_penalty * self.gradient_penalty_importance
         return {
             "total": total,

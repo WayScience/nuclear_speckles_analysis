@@ -9,6 +9,7 @@ import mlflow
 import numpy as np
 import optuna
 import torch
+from models.unconditional_critic import UnconditionalCritic
 from models.convnext_unet.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
@@ -21,14 +22,17 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
 )
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.L1Loss import L1Loss
+from losses.WassersteinGeneratorCrossZamirskiLoss import (
+    WassersteinGeneratorCrossZamirskiLoss,
+)
+from losses.WassersteinGradientPenaltyLoss import WassersteinGradientPenaltyLoss
 from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
 from splitters.HashSplitter import HashSplitter
-from trainers.UNetTrainer import UNetTrainer
+from trainers.WGANGPTrainer import WGANGPTrainer
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -123,7 +127,8 @@ class OptimizationManager:
         hash_splitter: Any,
         dataset: Any,
         callbacks_args: dict[str, Any],
-        model_factory: Callable[[], torch.nn.Module],
+        generator_factory: Callable[[], torch.nn.Module],
+        discriminator_factory: Callable[[], torch.nn.Module],
         **trainer_kwargs,
     ):
         """Store dependencies for Optuna-driven training trials.
@@ -133,7 +138,8 @@ class OptimizationManager:
             hash_splitter: Callable that returns train/val/test dataloaders.
             dataset: Dataset associated with the optimization run.
             callbacks_args: Static callback arguments reused across trials.
-            model_factory: Callable that creates a new model instance per trial.
+            generator_factory: Callable that creates a new generator instance per trial.
+            discriminator_factory: Callable that creates a new discriminator instance per trial.
             **trainer_kwargs: Shared trainer keyword arguments.
         """
 
@@ -141,7 +147,8 @@ class OptimizationManager:
         self.hash_splitter = hash_splitter
         self.dataset = dataset
         self.callbacks_args = callbacks_args
-        self.model_factory = model_factory
+        self.generator_factory = generator_factory
+        self.discriminator_factory = discriminator_factory
         self.trainer_kwargs = trainer_kwargs
 
     def __call__(self, trial: optuna.trial.Trial):
@@ -154,25 +161,44 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
-        # Let Optuna choose a mini-batch size and learning rate for this trial.
+        # Let Optuna choose core optimization and loss weights for this trial.
         batch_size = trial.suggest_int("batch_size", 1, 8)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        gradient_penalty_importance = trial.suggest_float(
+            "gradient_penalty_importance", 1.0, 20.0
+        )
+        reconstruction_importance = trial.suggest_float(
+            "reconstruction_importance", 10.0, 200.0
+        )
 
         # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
 
-        model = self.model_factory()
-        self.trainer_kwargs["model"] = model
+        generator = self.generator_factory()
+        discriminator = self.discriminator_factory()
+        self.trainer_kwargs["generator"] = generator
+        self.trainer_kwargs["discriminator"] = discriminator
 
-        optimizer_params = {
-            "params": model.parameters(),
+        generator_optimizer_params = {
+            "params": generator.parameters(),
+            "lr": lr,
+            "betas": (0.5, 0.999),
+        }
+        discriminator_optimizer_params = {
+            "params": discriminator.parameters(),
             "lr": lr,
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1Loss()
+        generator_loss = WassersteinGeneratorCrossZamirskiLoss(
+            reconstruction_importance=reconstruction_importance,
+            use_adversarial_decay=True,
+        )
+        discriminator_loss = WassersteinGradientPenaltyLoss(
+            gradient_penalty_importance=gradient_penalty_importance
+        )
         loss_callbacks = L1(device=device)
         metrics = [
             L2(device=device),
@@ -183,21 +209,32 @@ class OptimizationManager:
 
         # Use a nested MLflow run so each Optuna trial has its own metrics/artifacts.
         with mlflow.start_run(nested=True, run_name=f"trial_{trial.number}"):
-            optimizer = torch.optim.Adam(**optimizer_params)
-            self.trainer_kwargs["model_optimizer"] = optimizer
+            generator_optimizer = torch.optim.Adam(**generator_optimizer_params)
+            discriminator_optimizer = torch.optim.Adam(**discriminator_optimizer_params)
+            self.trainer_kwargs["generator_optimizer"] = generator_optimizer
+            self.trainer_kwargs["discriminator_optimizer"] = discriminator_optimizer
 
-            opt_params = optimizer.param_groups[0].copy()
+            opt_params = generator_optimizer.param_groups[0].copy()
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
-            mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
+            mlflow.log_param("gradient_penalty_importance", gradient_penalty_importance)
+            mlflow.log_param("reconstruction_importance", reconstruction_importance)
+            mlflow.log_param("use_adversarial_decay", True)
+            mlflow.set_tag(
+                "optimizer_class", generator_optimizer.__class__.__name__.lower()
+            )
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
                 **self.callbacks_args | {"metrics": metrics, "loss": loss_callbacks}
             )
 
             trainer_obj = self.trainer(
-                **self.trainer_kwargs | {"model_loss": loss_trainer}
+                **self.trainer_kwargs
+                | {
+                    "generator_loss": generator_loss,
+                    "discriminator_loss": discriminator_loss,
+                }
             )
             trainer_obj.train()
 
@@ -226,11 +263,14 @@ mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
 
 description = """
-Optimization of a DAPI-to-Gold image-to-image translation model with:
+Optimization of an unconditional WGAN-GP DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
+- Unconditional convolutional discriminator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- L1 optimization objective with L2, PSNR, SSIM, and Pearson correlation metric logging
+- Generator objective: reconstruction-weighted L1 plus epoch-decayed adversarial term
+- Discriminator objective: Wasserstein loss with gradient penalty
+- Validation uses L1, L2, PSNR, SSIM, and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
@@ -323,16 +363,19 @@ callbacks_args = {
 }
 
 optimization_manager = OptimizationManager(
-    trainer=UNetTrainer,
+    trainer=WGANGPTrainer,
     hash_splitter=hash_splitter,
     dataset=crop_image_dataset,
     callbacks_args=callbacks_args,
-    model_factory=lambda: ConvNeXtUNet(
+    generator_factory=lambda: ConvNeXtUNet(
         in_channels=1,
         out_channels=1,
         decoder_up_block="convt",
     ),
+    discriminator_factory=lambda: UnconditionalCritic(in_channels=1),
     epochs=args.epochs,
+    image_postprocessor=image_postprocessor,
+    device=device,
     max_train_batches=max_train_batches,
 )
 

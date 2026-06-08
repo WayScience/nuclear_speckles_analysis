@@ -40,13 +40,23 @@ class BatchLossMlflowLoggerCallback(BaseCallback):
             self.global_batch_step += 1
             return
 
-        batch_loss_components = hook_data.get("batch_loss_components", {})
-        batch_loss_name = hook_data.get("batch_loss_name", "unknown_loss")
-        for loss_name, loss_value in batch_loss_components.items():
-            mlflow.log_metric(
-                f"batch/train/{batch_loss_name}/{loss_name}",
-                loss_value,
-                step=self.global_batch_step,
-            )
+        batch_loss_groups = hook_data.get("batch_loss_groups")
+        if batch_loss_groups is not None:
+            for group_name, batch_loss_components in batch_loss_groups.items():
+                for loss_name, loss_value in batch_loss_components.items():
+                    mlflow.log_metric(
+                        f"batch/train/{group_name}/{loss_name}",
+                        loss_value,
+                        step=self.global_batch_step,
+                    )
+        else:
+            batch_loss_components = hook_data.get("batch_loss_components", {})
+            batch_loss_name = hook_data.get("batch_loss_name", "unknown_loss")
+            for loss_name, loss_value in batch_loss_components.items():
+                mlflow.log_metric(
+                    f"batch/train/{batch_loss_name}/{loss_name}",
+                    loss_value,
+                    step=self.global_batch_step,
+                )
 
         self.global_batch_step += 1
