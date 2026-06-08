@@ -353,6 +353,7 @@ def ensure_dapi_to_gold_cache(
     cache_dir: pathlib.Path,
     input_channel: str,
     target_channel: str,
+    crop_size: int = 256,
     metadata_column_map: dict[str, str] | None = None,
 ) -> CropCacheResult:
     """Build or reuse a DAPI-to-Gold crop cache for configured channels.
@@ -365,6 +366,7 @@ def ensure_dapi_to_gold_cache(
             is normalized to uppercase before channel lookup and manifest writes.
         target_channel: Target channel name used for Gold target crops. The value
             is normalized to uppercase before channel lookup and manifest writes.
+        crop_size: Fixed square crop size in pixels for cached nucleus crops.
         metadata_column_map: Optional source-to-canonical metadata renaming map.
 
     Returns:
@@ -379,6 +381,9 @@ def ensure_dapi_to_gold_cache(
     input_channel = input_channel.upper()
     target_channel = target_channel.upper()
 
+    if crop_size <= 0:
+        raise ValueError(f"crop_size must be positive, got {crop_size}")
+
     is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
     if is_valid:
         # Fast path: manifest already points to valid, existing cached crops.
@@ -392,8 +397,8 @@ def ensure_dapi_to_gold_cache(
         metadata_column_map=metadata_column_map,
     )
 
-    target_width = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_X"].max())
-    target_height = int(scdf["Nuclei_AreaShape_BoundingBoxDelta_Y"].max())
+    target_width = int(crop_size)
+    target_height = int(crop_size)
 
     rows: list[dict[str, str]] = []
 
