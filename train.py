@@ -16,7 +16,9 @@ from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache, load_cache_manifest)
+    ensure_dapi_to_gold_cache,
+    load_cache_manifest,
+)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1Loss import L1Loss
@@ -104,6 +106,7 @@ parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
+parser.add_argument("--crop-size", type=int, default=256)
 args = parser.parse_args()
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
@@ -208,6 +211,9 @@ cache_root = dataset_config.cache_root
 crop_cache_path = cache_root / "dapi_to_gold_crop_cache"
 tensor_cache_path = cache_root / "paired_tensor_cache"
 
+if args.crop_size <= 0:
+    raise ValueError(f"crop_size must be positive, got {args.crop_size}")
+
 # Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 random.seed(0)
@@ -217,6 +223,7 @@ mlflow.log_param("random_seed", 0)
 mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
+mlflow.log_param("crop_size", args.crop_size)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -234,6 +241,7 @@ cache_result = ensure_dapi_to_gold_cache(
     cache_dir=crop_cache_path,
     input_channel=dataset_config.input_channel,
     target_channel=dataset_config.target_channel,
+    crop_size=args.crop_size,
     metadata_column_map=dataset_config.metadata_column_map,
 )
 manifest_nuclei = load_cache_manifest(manifest_path=cache_result.manifest_path)

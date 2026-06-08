@@ -9,6 +9,7 @@ entry_points:
       max_train_batches: {type: int, default: -1}
       max_eval_batches: {type: int, default: -1}
       enable_image_savers: {type: int, default: 1}
+      crop_size: {type: int, default: 256}
     command: >
       uv run train.py
       --dataset {dataset}
@@ -17,3 +18,4 @@ entry_points:
       --max-train-batches {max_train_batches}
       --max-eval-batches {max_eval_batches}
       --enable-image-savers {enable_image_savers}
+      --crop-size {crop_size}
