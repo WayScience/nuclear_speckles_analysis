@@ -162,7 +162,7 @@ class OptimizationManager:
         """
 
         # Let Optuna choose core optimization and loss weights for this trial.
-        batch_size = trial.suggest_int("batch_size", 1, 5)
+        batch_size = trial.suggest_int("batch_size", 1, 2)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
         gradient_penalty_importance = trial.suggest_float(
             "gradient_penalty_importance", 1.0, 20.0
