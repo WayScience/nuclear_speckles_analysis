@@ -329,6 +329,7 @@ hash_splitter = HashSplitter(
     val_frac=0.125,
 )
 
+# Use a fixed batch size here only to iterate splits while choosing preview images.
 train_dataloader, val_dataloader, _ = hash_splitter(batch_size=16)
 train_crop_dataset_idxs = SampleImages(
     datastruct=train_dataloader, image_fraction=1 / 512
