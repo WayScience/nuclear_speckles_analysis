@@ -87,13 +87,14 @@ class WGANGPTrainer:
                 inputs = batch_data["input"].to(self.device)
                 targets = batch_data["target"].to(self.device)
 
-                fake_targets_for_discriminator = self.image_postprocessor(
-                    self.generator(inputs)
-                )
+                with torch.no_grad():
+                    fake_targets_for_discriminator = self.image_postprocessor(
+                        self.generator(inputs)
+                    )
                 discriminator_outputs = self.discriminator_loss(
                     critic=self.discriminator,
                     real_samples=targets,
-                    fake_samples=fake_targets_for_discriminator.detach(),
+                    fake_samples=fake_targets_for_discriminator,
                 )
                 discriminator_loss, discriminator_components = self._detach_components(
                     discriminator_outputs
