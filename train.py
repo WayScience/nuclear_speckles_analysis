@@ -362,7 +362,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 5,
+    "early_stopping_counter_threshold": 10,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1
