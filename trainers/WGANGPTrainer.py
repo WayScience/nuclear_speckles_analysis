@@ -22,7 +22,13 @@ class WGANGPTrainer:
         epochs: int = 10,
         device: Union[str, torch.device] = "cuda",
         max_train_batches: int | None = None,
+        discriminator_updates_per_generator_update: int = 1,
     ) -> None:
+        if discriminator_updates_per_generator_update <= 0:
+            raise ValueError(
+                "discriminator_updates_per_generator_update must be a positive integer"
+            )
+
         self.generator = generator
         self.discriminator = discriminator
         self.generator_optimizer = generator_optimizer
@@ -38,6 +44,10 @@ class WGANGPTrainer:
             device if isinstance(device, torch.device) else torch.device(device)
         )
         self.max_train_batches = max_train_batches
+        self.discriminator_updates_per_generator_update = (
+            discriminator_updates_per_generator_update
+        )
+        self.discriminator_steps_since_generator_update = 0
 
     @property
     def best_loss_value(self):
@@ -103,36 +113,55 @@ class WGANGPTrainer:
                 self.discriminator_optimizer.zero_grad()
                 discriminator_loss.backward()
                 self.discriminator_optimizer.step()
+                self.discriminator_steps_since_generator_update += 1
 
-                generated_predictions = self.image_postprocessor(self.generator(inputs))
-                fake_classification_outputs = self.discriminator(generated_predictions)
-                generator_outputs = self.generator_loss(
-                    fake_classification_outputs=fake_classification_outputs,
-                    generated_predictions=generated_predictions,
-                    targets=targets,
-                    epoch=epoch,
-                    loss_mask=batch_data.get("loss_mask"),
-                )
-                generator_loss, generator_components = self._detach_components(
-                    generator_outputs
-                )
-
-                self.generator_optimizer.zero_grad()
-                generator_loss.backward()
-                self.generator_optimizer.step()
-
-                train_data["generated_predictions"] = generated_predictions
-                train_data["model_update_loss"] = generator_loss
-                train_data["batch_loss_components"] = generator_components
-                train_data["batch_loss_name"] = getattr(
-                    self.generator_loss,
-                    "loss_name",
-                    self.generator_loss.__class__.__name__,
-                )
+                train_data.pop("generated_predictions", None)
+                train_data.pop("model_update_loss", None)
+                train_data.pop("batch_loss_name", None)
+                train_data["batch_loss_components"] = discriminator_components
                 train_data["batch_loss_groups"] = {
-                    "generator": generator_components,
                     "discriminator": discriminator_components,
                 }
+
+                if (
+                    self.discriminator_steps_since_generator_update
+                    >= self.discriminator_updates_per_generator_update
+                ):
+                    generated_predictions = self.image_postprocessor(
+                        self.generator(inputs)
+                    )
+                    fake_classification_outputs = self.discriminator(
+                        generated_predictions
+                    )
+                    generator_outputs = self.generator_loss(
+                        fake_classification_outputs=fake_classification_outputs,
+                        generated_predictions=generated_predictions,
+                        targets=targets,
+                        epoch=epoch,
+                        loss_mask=batch_data.get("loss_mask"),
+                    )
+                    generator_loss, generator_components = self._detach_components(
+                        generator_outputs
+                    )
+
+                    self.generator_optimizer.zero_grad()
+                    generator_loss.backward()
+                    self.generator_optimizer.step()
+                    self.discriminator_steps_since_generator_update = 0
+
+                    train_data["generated_predictions"] = generated_predictions
+                    train_data["model_update_loss"] = generator_loss
+                    train_data["batch_loss_components"] = generator_components
+                    train_data["batch_loss_name"] = getattr(
+                        self.generator_loss,
+                        "loss_name",
+                        self.generator_loss.__class__.__name__,
+                    )
+                    train_data["batch_loss_groups"] = {
+                        "generator": generator_components,
+                        "discriminator": discriminator_components,
+                    }
+
                 train_data["model"] = self.generator
                 train_data["callback_hook"] = "on_batch_end"
 

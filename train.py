@@ -170,6 +170,9 @@ class OptimizationManager:
         reconstruction_importance = trial.suggest_float(
             "reconstruction_importance", 10.0, 200.0
         )
+        discriminator_updates_per_generator_update = trial.suggest_int(
+            "discriminator_updates_per_generator_update", 1, 5
+        )
 
         # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
@@ -220,6 +223,10 @@ class OptimizationManager:
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("gradient_penalty_importance", gradient_penalty_importance)
             mlflow.log_param("reconstruction_importance", reconstruction_importance)
+            mlflow.log_param(
+                "discriminator_updates_per_generator_update",
+                discriminator_updates_per_generator_update,
+            )
             mlflow.log_param("use_adversarial_decay", True)
             mlflow.set_tag(
                 "optimizer_class", generator_optimizer.__class__.__name__.lower()
@@ -234,6 +241,9 @@ class OptimizationManager:
                 | {
                     "generator_loss": generator_loss,
                     "discriminator_loss": discriminator_loss,
+                    "discriminator_updates_per_generator_update": (
+                        discriminator_updates_per_generator_update
+                    ),
                 }
             )
             trainer_obj.train()
