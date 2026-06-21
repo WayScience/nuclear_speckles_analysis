@@ -1,13 +1,19 @@
 import torch
 from torch import nn
 
+from trainers.utils.wgan_gp import compute_generator_components
+
 
 class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
     """Generator loss combining L1 reconstruction and Wasserstein term."""
 
     loss_name = "wasserstein_generator"  # Stable MLflow namespace for this loss family.
 
-    def __init__(self, reconstruction_importance: float = 100.0) -> None:
+    def __init__(
+        self,
+        reconstruction_importance: float = 100.0,
+        use_adversarial_decay: bool = True,
+    ) -> None:
         """Configure weighting for the reconstruction component.
 
         Args:
@@ -16,6 +22,7 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
 
         super().__init__()
         self.reconstruction_importance = reconstruction_importance
+        self.use_adversarial_decay = use_adversarial_decay
 
     def forward(
         self,
@@ -43,19 +50,15 @@ class WassersteinGeneratorCrossZamirskiLoss(nn.Module):
             ValueError: If critic output batch size does not match predictions batch size.
         """
 
-        if generated_predictions.shape != targets.shape:
-            raise ValueError("generated_predictions and targets must have the same shape.")
-
-        batch_size = generated_predictions.size(0)
-        if fake_classification_outputs.size(0) != batch_size:
-            raise ValueError(
-                "fake_classification_outputs batch size must match generated_predictions."
-            )
-
-        reconstruction_loss = torch.nn.functional.l1_loss(
-            generated_predictions, targets, reduction="mean"
+        components = compute_generator_components(
+            fake_classification_outputs=fake_classification_outputs,
+            generated_predictions=generated_predictions,
+            targets=targets,
+            epoch=epoch,
+            use_adversarial_decay=self.use_adversarial_decay,
         )
-        adversarial_term = torch.mean(fake_classification_outputs) / (epoch + 1)
+        reconstruction_loss = components["reconstruction_term"]
+        adversarial_term = components["adversarial_term"]
         total = self.reconstruction_importance * reconstruction_loss - adversarial_term
         return {
             "total": total,

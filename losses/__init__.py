@@ -1,3 +1,2 @@
-from .L1Loss import L1Loss
 from .WassersteinGeneratorCrossZamirskiLoss import WassersteinGeneratorCrossZamirskiLoss
 from .WassersteinGradientPenaltyLoss import WassersteinGradientPenaltyLoss

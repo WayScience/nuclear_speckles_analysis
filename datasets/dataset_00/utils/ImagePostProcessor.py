@@ -3,7 +3,6 @@ from typing import Any, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.amp import autocast
 
 
 class ImagePostProcessor:

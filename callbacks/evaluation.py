@@ -66,7 +66,6 @@ class EpochEvaluatorCallback(BaseCallback):
         """
 
         model.eval()
-
         with torch.no_grad():
             for batch_idx, samples in enumerate(dataloader):
                 generated_predictions = model(samples["input"])
