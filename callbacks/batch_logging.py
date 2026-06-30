@@ -60,3 +60,17 @@ class BatchLossMlflowLoggerCallback(BaseCallback):
                 )
 
         self.global_batch_step += 1
+
+    def state_dict(self) -> dict[str, int]:
+        """Return batch-logging state needed for interrupted-run resume."""
+
+        return {"global_batch_step": self.global_batch_step}
+
+    def load_state_dict(self, state_dict: dict[str, int]) -> None:
+        """Restore batch-logging state from a resumable checkpoint.
+
+        Args:
+            state_dict: Serialized state produced by ``state_dict``.
+        """
+
+        self.global_batch_step = state_dict.get("global_batch_step", 0)

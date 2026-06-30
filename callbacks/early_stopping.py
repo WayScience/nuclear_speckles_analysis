@@ -84,3 +84,21 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
 
         input_numpy = input_example.detach().cpu().numpy().astype("float32")
         return infer_signature(input_numpy, output_example)
+
+    def state_dict(self) -> dict[str, float | int]:
+        """Return early-stopping state required for interrupted-run resume."""
+
+        return {
+            "best_loss_value": self.best_loss_value,
+            "early_stopping_counter": self.early_stopping_counter,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, float | int]) -> None:
+        """Restore early-stopping state from a resumable checkpoint.
+
+        Args:
+            state_dict: Serialized state produced by ``state_dict``.
+        """
+
+        self.best_loss_value = float(state_dict.get("best_loss_value", float("inf")))
+        self.early_stopping_counter = int(state_dict.get("early_stopping_counter", 0))

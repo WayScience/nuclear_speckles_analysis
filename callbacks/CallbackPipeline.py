@@ -99,6 +99,24 @@ class CallbackPipeline:
 
         return self.early_stopping.best_loss_value
 
+    def state_dict(self) -> dict[str, Any]:
+        """Return callback state required for resumable training checkpoints."""
+
+        return {
+            "batch_logger": self.batch_logger.state_dict(),
+            "early_stopping": self.early_stopping.state_dict(),
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore callback state from a resumable training checkpoint.
+
+        Args:
+            state_dict: Serialized callback state produced by ``state_dict``.
+        """
+
+        self.batch_logger.load_state_dict(state_dict.get("batch_logger", {}))
+        self.early_stopping.load_state_dict(state_dict.get("early_stopping", {}))
+
     def __call__(self, callback_hook: str, **kwargs) -> Any:
         """Execute a lifecycle hook across composed callbacks.
 
