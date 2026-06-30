@@ -23,7 +23,35 @@ class WGANGPTrainer:
         device: Union[str, torch.device] = "cuda",
         max_train_batches: int | None = None,
         discriminator_updates_per_generator_update: int = 1,
+        discriminator_steps_since_generator_update: int = 0,
+        start_epoch: int = 0,
+        checkpoint_manager: Any = None,
+        trial_metadata: dict[str, Any] | None = None,
     ) -> None:
+        """Store one training run's modules, loaders, and resume state.
+
+        Args:
+            generator: Generator module optimized during training.
+            discriminator: Discriminator module optimized during training.
+            generator_optimizer: Optimizer paired with the generator.
+            discriminator_optimizer: Optimizer paired with the discriminator.
+            generator_loss: Generator loss module.
+            discriminator_loss: Discriminator loss module.
+            train_dataloader: Training dataloader.
+            val_dataloader: Validation dataloader.
+            callbacks: Callback pipeline triggered during training.
+            image_postprocessor: Postprocessor applied to generator outputs.
+            epochs: Total epoch budget for the logical trial.
+            device: Device used for training.
+            max_train_batches: Optional cap on train batches per epoch.
+            discriminator_updates_per_generator_update: Number of discriminator
+                steps per generator step.
+            discriminator_steps_since_generator_update: Restored cadence state
+                when resuming an interrupted trial.
+            start_epoch: Epoch index to resume from.
+            checkpoint_manager: Optional resumable checkpoint writer.
+            trial_metadata: Trial metadata persisted alongside checkpoints.
+        """
         if discriminator_updates_per_generator_update <= 0:
             raise ValueError(
                 "discriminator_updates_per_generator_update must be a positive integer"
@@ -47,7 +75,13 @@ class WGANGPTrainer:
         self.discriminator_updates_per_generator_update = (
             discriminator_updates_per_generator_update
         )
-        self.discriminator_steps_since_generator_update = 0
+        self.discriminator_steps_since_generator_update = (
+            discriminator_steps_since_generator_update
+        )
+        self.start_epoch = start_epoch
+        self.checkpoint_manager = checkpoint_manager
+        self.trial_metadata = trial_metadata or {}
+        self.last_completed_epoch = start_epoch - 1
 
     @property
     def best_loss_value(self):
@@ -80,7 +114,7 @@ class WGANGPTrainer:
         self.generator = self.generator.to(self.device)
         self.discriminator = self.discriminator.to(self.device)
 
-        for epoch in range(self.epochs):
+        for epoch in range(self.start_epoch, self.epochs):
             train_data["epoch"] = epoch
             train_data["callback_hook"] = "on_epoch_start"
             self.callbacks(**train_data)
@@ -182,6 +216,27 @@ class WGANGPTrainer:
                 val_dataloader=self.val_dataloader,
                 **train_data,
             )
+            self.last_completed_epoch = epoch
+
+            if self.checkpoint_manager is not None:
+                # Persist full trial state after each completed epoch so restarts
+                # can continue without discarding completed work.
+                self.checkpoint_manager.save(
+                    generator=self.generator,
+                    discriminator=self.discriminator,
+                    generator_optimizer=self.generator_optimizer,
+                    discriminator_optimizer=self.discriminator_optimizer,
+                    next_epoch=epoch + 1,
+                    callbacks_state=self.callbacks.state_dict(),
+                    discriminator_steps_since_generator_update=(
+                        self.discriminator_steps_since_generator_update
+                    ),
+                    trial_metadata={
+                        **self.trial_metadata,
+                        "last_completed_epoch": epoch,
+                        "best_loss_value": self.callbacks.best_loss_value,
+                    },
+                )
 
             if not train_data["continue_training"]:
                 break
