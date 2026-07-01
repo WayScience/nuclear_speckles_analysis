@@ -52,7 +52,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
         out_channels: int,
         decoder_up_block: Literal['pixelshuffle', 'convt'] = 'convt',
         decoder_compute_block: Literal['convnext', 'conv2d'] = 'convnext',
-        act_type: ActivationType = 'sigmoid',
+        act_type: ActivationType = 'none',
         _num_units: Union[List[int], int] = 2
     ):
         """
@@ -67,7 +67,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
             decoder. Can be 'convnext' for Conv2DConvNeXtBlock or 'conv2d' for
             Conv2DNormActBlock. Default is 'convnext'.
         :param act_type: Type of activation function to use in the output layer.
-            Default is 'sigmoid'.
+            Default is 'none'.
         :param _num_units: Number of computation units in each stage.
             Can be an integer for uniform number of units in all stages,
             or a list of integers specifying the number of units for each stage.

@@ -105,7 +105,7 @@ class BaseGeneratorModel(BaseModel):
         self,
         in_channels: int,
         out_channels: int,
-        out_activation: ActivationType = 'sigmoid',
+        out_activation: ActivationType = 'none',
     ):
         
         super().__init__()
