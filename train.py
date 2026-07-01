@@ -63,7 +63,7 @@ speckle_dataset_path = pathlib.Path("/pl/active/koala/nuclear_speckle_data").res
     strict=True
 )
 u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
-initial_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "initial_dataset"
 
 DATASET_CONFIGS = {
     "u2os": DatasetConfig(
