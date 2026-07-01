@@ -56,7 +56,7 @@ speckle_dataset_path = pathlib.Path("/mnt/big_drive/nuclear_speckle_data").resol
     strict=True
 )
 u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
-initial_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "initial_dataset"
 
 DATASET_CONFIGS = {
     "u2os": DatasetConfig(
