@@ -11,31 +11,30 @@ import optuna
 import torch
 from optuna.samplers import TPESampler
 from optuna.trial import TrialState
-from models.unconditional_critic import UnconditionalCritic
-from models.convnext_unet.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache,
-    load_cache_manifest,
-)
+    ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.WassersteinGeneratorCrossZamirskiLoss import (
-    WassersteinGeneratorCrossZamirskiLoss,
-)
-from losses.WassersteinGradientPenaltyLoss import WassersteinGradientPenaltyLoss
+from losses.WassersteinGeneratorCrossZamirskiLoss import \
+    WassersteinGeneratorCrossZamirskiLoss
+from losses.WassersteinGradientPenaltyLoss import \
+    WassersteinGradientPenaltyLoss
 from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
+from models.convnext_unet.unext import ConvNeXtUNet
+from models.unconditional_critic import UnconditionalCritic
 from splitters.HashSplitter import HashSplitter
-from trainers.WGANGPTrainer import WGANGPTrainer
 from trainers.utils.trial_checkpoint import TrialCheckpointManager
+from trainers.WGANGPTrainer import WGANGPTrainer
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -60,17 +59,18 @@ class DatasetConfig:
     holdout_plate: str | None = None
 
 
+speckle_dataset_path = pathlib.Path("/pl/active/koala/nuclear_speckle_data").resolve(
+    strict=True
+)
+u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+
 DATASET_CONFIGS = {
     "u2os": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache"
-        ),
+        image_dir=u2os_dataset_path / "u20s_images/tiffs",
+        parquet_path=u2os_dataset_path
+        / "u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet",
+        cache_root=u2os_dataset_path / "model_cache",
         input_channel="CH01",
         target_channel="CH03",
         metadata_column_map={
@@ -80,15 +80,9 @@ DATASET_CONFIGS = {
         holdout_plate="Rep3",
     ),
     "initial": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/IC_corrected_images"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/Preprocessed_data/cleaned_sc_profiles"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache"
-        ),
+        image_dir=initial_dataset_path / "IC_corrected_images",
+        parquet_path=initial_dataset_path / "Preprocessed_data/cleaned_sc_profiles",
+        cache_root=initial_dataset_path / "model_cache",
         input_channel="CH0",
         target_channel="CH2",
         metadata_column_map={
@@ -116,7 +110,9 @@ parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default
 parser.add_argument("--crop-size", type=int, default=256)
 parser.add_argument("--study-name", type=str, default="model_training")
 parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
-parser.add_argument("--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints"))
+parser.add_argument(
+    "--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints")
+)
 parser.add_argument("--resume", type=int, choices=[0, 1], default=1)
 parser.add_argument("--parent-run-id", type=str, default=None)
 args = parser.parse_args()
@@ -216,7 +212,9 @@ def get_resumable_trial(study: optuna.Study) -> optuna.trial.Trial | None:
         Live Optuna ``Trial`` handle when resumable work exists, else ``None``.
     """
 
-    for frozen_trial in sorted(study.get_trials(deepcopy=False), key=lambda trial: trial.number):
+    for frozen_trial in sorted(
+        study.get_trials(deepcopy=False), key=lambda trial: trial.number
+    ):
         if is_resumable_trial(frozen_trial):
             return optuna.trial.Trial(study=study, trial_id=frozen_trial._trial_id)
     return None
@@ -395,7 +393,9 @@ class OptimizationManager:
                 # Resume trial state before any training/logging steps are replayed.
                 checkpoint_data = checkpoint_manager.load(map_location=device)
                 generator.load_state_dict(checkpoint_data["generator_state_dict"])
-                discriminator.load_state_dict(checkpoint_data["discriminator_state_dict"])
+                discriminator.load_state_dict(
+                    checkpoint_data["discriminator_state_dict"]
+                )
                 generator_optimizer.load_state_dict(
                     checkpoint_data["generator_optimizer_state_dict"]
                 )
@@ -435,9 +435,7 @@ class OptimizationManager:
                             "gradient_penalty_importance": (
                                 gradient_penalty_importance
                             ),
-                            "reconstruction_importance": (
-                                reconstruction_importance
-                            ),
+                            "reconstruction_importance": (reconstruction_importance),
                             "discriminator_updates_per_generator_update": (
                                 discriminator_updates_per_generator_update
                             ),
@@ -475,7 +473,9 @@ class OptimizationManager:
                 mlflow.set_tag("resume_status", "resumable")
                 raise
             trial.set_user_attr("resume_status", "completed")
-            trial.set_user_attr("last_completed_epoch", trainer_obj.last_completed_epoch)
+            trial.set_user_attr(
+                "last_completed_epoch", trainer_obj.last_completed_epoch
+            )
             mlflow.set_tag("resume_status", "completed")
 
             return trainer_obj.best_loss_value
@@ -555,7 +555,9 @@ manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
 if dataset_config.holdout_plate is not None:
     # Keep one plate fully held out to prevent leakage across similar acquisition batches.
     manifest_nuclei = [
-        nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
+        nuclei
+        for nuclei in manifest_nuclei
+        if nuclei.get("plate") != dataset_config.holdout_plate
     ]
 manifest_nuclei_after_holdout_filter = len(manifest_nuclei)
 
