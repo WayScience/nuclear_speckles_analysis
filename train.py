@@ -9,16 +9,13 @@ import mlflow
 import numpy as np
 import optuna
 import torch
-from models.convnext_unet.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache,
-    load_cache_manifest,
-)
+    ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1Loss import L1Loss
@@ -27,8 +24,10 @@ from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
+from models.convnext_unet.unext import ConvNeXtUNet
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -53,17 +52,18 @@ class DatasetConfig:
     holdout_plate: str | None = None
 
 
+speckle_dataset_path = pathlib.Path("/mnt/big_drive/nuclear_speckle_data").resolve(
+    strict=True
+)
+u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+
 DATASET_CONFIGS = {
     "u2os": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache"
-        ),
+        image_dir=u2os_dataset_path / "u20s_images/tiffs",
+        parquet_path=u2os_dataset_path
+        / "u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet",
+        cache_root=u2os_dataset_path / "model_cache",
         input_channel="CH01",
         target_channel="CH03",
         metadata_column_map={
@@ -73,15 +73,9 @@ DATASET_CONFIGS = {
         holdout_plate="Rep3",
     ),
     "initial": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/IC_corrected_images"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/Preprocessed_data/cleaned_sc_profiles"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache"
-        ),
+        image_dir=initial_dataset_path / "IC_corrected_images",
+        parquet_path=initial_dataset_path / "Preprocessed_data/cleaned_sc_profiles",
+        cache_root=initial_dataset_path / "model_cache",
         input_channel="CH0",
         target_channel="CH2",
         metadata_column_map={
@@ -250,7 +244,9 @@ manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
 if dataset_config.holdout_plate is not None:
     # Keep one plate fully held out to prevent leakage across similar acquisition batches.
     manifest_nuclei = [
-        nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
+        nuclei
+        for nuclei in manifest_nuclei
+        if nuclei.get("plate") != dataset_config.holdout_plate
     ]
 manifest_nuclei_after_holdout_filter = len(manifest_nuclei)
 
