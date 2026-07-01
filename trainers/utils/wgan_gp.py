@@ -124,10 +124,8 @@ def compute_generator_components(
     fake_classification_outputs: torch.Tensor,
     generated_predictions: torch.Tensor,
     targets: torch.Tensor,
-    epoch: int = 0,
-    use_adversarial_decay: bool = True,
 ) -> dict[str, torch.Tensor]:
-    """Compute unconditional WGAN generator terms with optional epoch decay."""
+    """Compute unconditional WGAN generator reconstruction and adversarial terms."""
 
     if generated_predictions.shape != targets.shape:
         raise ValueError("generated_predictions and targets must have the same shape.")
@@ -142,8 +140,6 @@ def compute_generator_components(
         generated_predictions, targets, reduction="mean"
     )
     adversarial_term = torch.mean(fake_classification_outputs)
-    if use_adversarial_decay:
-        adversarial_term = adversarial_term / (epoch + 1)
 
     return {
         "reconstruction_term": reconstruction_term,

@@ -119,6 +119,8 @@ class BaseGeneratorModel(BaseModel):
         self.decoder: Optional[torch.nn.Module] = None
         self.out_conv: Optional[torch.nn.Module] = None
         self._act_type = out_activation
+        # Active training applies output squashing in ImagePostProcessor, so the
+        # model defaults to emitting logits unless a caller overrides this.
         self._out_activation = get_activation(out_activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

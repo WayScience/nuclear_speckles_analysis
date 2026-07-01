@@ -29,6 +29,7 @@ from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
+from metrics.ValidationGeneratorLoss import ValidationGeneratorLoss
 from models.convnext_unet.unext import ConvNeXtUNet
 from models.unconditional_critic import UnconditionalCritic
 from splitters.HashSplitter import HashSplitter
@@ -324,13 +325,21 @@ class OptimizationManager:
 
         generator_loss = WassersteinGeneratorCrossZamirskiLoss(
             reconstruction_importance=reconstruction_importance,
-            use_adversarial_decay=True,
+            adversarial_importance=1.0,
         )
         discriminator_loss = WassersteinGradientPenaltyLoss(
             gradient_penalty_importance=gradient_penalty_importance
         )
-        loss_callbacks = L1(device=device)
+        # Keep checkpoint selection aligned with a stable generator objective
+        # while still logging reconstruction-focused metrics separately.
+        loss_callbacks = ValidationGeneratorLoss(
+            discriminator=discriminator,
+            reconstruction_importance=reconstruction_importance,
+            adversarial_importance=1.0,
+            device=device,
+        )
         metrics = [
+            L1(device=device),
             L2(device=device),
             PSNR(device=device, max_pixel_value=1.0),
             SSIM(device=device, max_pixel_value=1.0),
@@ -369,11 +378,11 @@ class OptimizationManager:
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("gradient_penalty_importance", gradient_penalty_importance)
             mlflow.log_param("reconstruction_importance", reconstruction_importance)
+            mlflow.log_param("adversarial_importance", 1.0)
             mlflow.log_param(
                 "discriminator_updates_per_generator_update",
                 discriminator_updates_per_generator_update,
             )
-            mlflow.log_param("use_adversarial_decay", True)
             mlflow.set_tag(
                 "optimizer_class", generator_optimizer.__class__.__name__.lower()
             )
@@ -533,9 +542,9 @@ Optimization of an unconditional WGAN-GP DAPI-to-Gold image-to-image translation
 - Unconditional convolutional discriminator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- Generator objective: reconstruction-weighted L1 plus epoch-decayed adversarial term
+- Generator objective: reconstruction-weighted L1 plus fixed-weight adversarial term
 - Discriminator objective: Wasserstein loss with gradient penalty
-- Validation uses L1, L2, PSNR, SSIM, and Pearson correlation metric logging
+- Model selection uses validation generator loss; L1, L2, PSNR, SSIM, and Pearson are logged alongside it
 """
 mlflow.set_tag("mlflow.note.content", description)
 

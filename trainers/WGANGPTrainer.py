@@ -171,7 +171,6 @@ class WGANGPTrainer:
                         fake_classification_outputs=fake_classification_outputs,
                         generated_predictions=generated_predictions,
                         targets=targets,
-                        epoch=epoch,
                         loss_mask=batch_data.get("loss_mask"),
                     )
                     generator_loss, generator_components = self._detach_components(
