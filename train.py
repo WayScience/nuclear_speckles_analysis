@@ -312,7 +312,6 @@ train_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=train_crop_dataset_idxs,
     split_name="training",
-    use_amp=eval_use_amp,
 )
 
 val_image_prediction_saver = SaveEpochCrops(
@@ -320,7 +319,6 @@ val_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=val_crop_dataset_idxs,
     split_name="validation",
-    use_amp=eval_use_amp,
 )
 
 callbacks_args = {
