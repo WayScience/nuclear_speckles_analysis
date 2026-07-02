@@ -668,6 +668,7 @@ callbacks_args = {
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
     "eval_use_amp": eval_use_amp,
+    "eval_amp_dtype": args.amp_dtype,
 }
 
 optimization_manager = OptimizationManager(

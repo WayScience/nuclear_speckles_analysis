@@ -17,6 +17,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         early_stopping_counter_threshold: int,
         image_postprocessor: Any = lambda x: x,
         use_amp: bool = False,
+        amp_dtype: torch.dtype | str = torch.bfloat16,
     ) -> None:
         """Initialize early-stopping and checkpoint state.
 
@@ -24,12 +25,29 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
             image_postprocessor: Postprocessor used before signature inference.
             use_amp: Whether to run signature inference under AMP.
+            amp_dtype: Explicit autocast dtype used for eval inference.
         """
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
         self.image_postprocessor = image_postprocessor
         self.use_amp = use_amp
+        self.amp_dtype = self._normalize_amp_dtype(amp_dtype)
         self.best_loss_value = float("inf")
         self.early_stopping_counter = 0
+
+    @staticmethod
+    def _normalize_amp_dtype(amp_dtype: torch.dtype | str) -> torch.dtype:
+        if isinstance(amp_dtype, torch.dtype):
+            if amp_dtype not in {torch.bfloat16, torch.float16}:
+                raise ValueError("amp_dtype must be torch.bfloat16 or torch.float16.")
+            return amp_dtype
+
+        amp_dtype_map = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+        }
+        if amp_dtype not in amp_dtype_map:
+            raise ValueError("amp_dtype must be 'bfloat16' or 'float16'.")
+        return amp_dtype_map[amp_dtype]
 
     def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
         """Update stop/checkpoint state at epoch end.
@@ -84,6 +102,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
             with torch.amp.autocast(
                 enabled=self.use_amp,
                 device_type=input_example.device.type,
+                dtype=self.amp_dtype,
             ):
                 output_example = (
                     self.image_postprocessor(model(input_example))

@@ -1,5 +1,6 @@
 from typing import Any, List, Optional, Union
 
+import torch
 from torch.nn import Module
 
 from callbacks.base import Callback
@@ -50,6 +51,7 @@ class CallbackPipeline:
         batch_metric_log_every_n: int = 1,
         max_eval_batches: int | None = None,
         eval_use_amp: bool = False,
+        eval_amp_dtype: torch.dtype | str = torch.bfloat16,
     ) -> None:
         """Initialize composed callbacks used during training.
 
@@ -63,6 +65,7 @@ class CallbackPipeline:
             batch_metric_log_every_n: Batch interval for MLflow batch loss metrics.
             max_eval_batches: Optional cap on batches during callback evaluation.
             eval_use_amp: Whether to use AMP for evaluation-only inference paths.
+            eval_amp_dtype: Explicit autocast dtype used for eval AMP paths.
         """
         self.progress = ProgressLoggerCallback(batch_log_every_n=batch_log_every_n)
         self.batch_logger = BatchLossMlflowLoggerCallback(
@@ -74,6 +77,7 @@ class CallbackPipeline:
             image_postprocessor=image_postprocessor,
             max_eval_batches=max_eval_batches,
             use_amp=eval_use_amp,
+            amp_dtype=eval_amp_dtype,
         )
         self.metrics_logger = MetricsMlflowLoggerCallback(metrics=metrics, loss=loss)
         self.image_saver = ImageSaverCallback(image_savers=image_savers)
@@ -81,6 +85,7 @@ class CallbackPipeline:
             early_stopping_counter_threshold=early_stopping_counter_threshold,
             image_postprocessor=image_postprocessor,
             use_amp=eval_use_amp,
+            amp_dtype=eval_amp_dtype,
         )
 
         self.composer = CallbackComposer(
