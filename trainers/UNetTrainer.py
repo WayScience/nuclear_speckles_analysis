@@ -22,6 +22,8 @@ class UNetTrainer:
         epochs: int = 10,
         device: Union[str, torch.device] = "cuda",
         use_amp: bool = True,
+        eval_train_dataloader: Union[torch.utils.data.Dataset, DataLoader, None] = None,
+        eval_val_dataloader: Union[torch.utils.data.Dataset, DataLoader, None] = None,
         max_train_batches: int | None = None,
     ) -> None:
         """Initialize trainer state and optional AMP scaler.
@@ -39,6 +41,8 @@ class UNetTrainer:
             epochs: Maximum number of training epochs.
             device: Target device for model and tensors.
             use_amp: Whether to use automatic mixed precision.
+            eval_train_dataloader: Optional dataloader used for epoch-end train metrics.
+            eval_val_dataloader: Optional dataloader used for epoch-end validation metrics.
             max_train_batches: Optional cap on train batches per epoch.
         """
 
@@ -54,6 +58,12 @@ class UNetTrainer:
             device if isinstance(device, torch.device) else torch.device(device)
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
+        self.eval_train_dataloader = (
+            train_dataloader if eval_train_dataloader is None else eval_train_dataloader
+        )
+        self.eval_val_dataloader = (
+            val_dataloader if eval_val_dataloader is None else eval_val_dataloader
+        )
         self.max_train_batches = max_train_batches
         # Stable loss identifier used to namespace batch metrics in MLflow.
         self.loss_name = getattr(self.model_loss, "loss_name", self.model_loss.__class__.__name__)
@@ -167,6 +177,8 @@ class UNetTrainer:
             train_data["continue_training"] = self.callbacks(
                 train_dataloader=self.train_dataloader,
                 val_dataloader=self.val_dataloader,
+                eval_train_dataloader=self.eval_train_dataloader,
+                eval_val_dataloader=self.eval_val_dataloader,
                 **train_data,
             )
 

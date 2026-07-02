@@ -97,6 +97,8 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+parser.add_argument("--eval-batch-size", type=int, default=-1)
+parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
@@ -106,6 +108,8 @@ args = parser.parse_args()
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
+requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
+eval_use_amp = args.eval_use_amp == 1
 
 
 class OptimizationManager:
@@ -151,11 +155,18 @@ class OptimizationManager:
         # Let Optuna choose a mini-batch size and learning rate for this trial.
         batch_size = trial.suggest_int("batch_size", 1, 8)
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
         # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
+        eval_train_dataloader, eval_val_dataloader, _ = self.hash_splitter.build_loaders(
+            batch_size=eval_batch_size,
+            train_shuffle=False,
+        )
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
+        self.trainer_kwargs["eval_train_dataloader"] = eval_train_dataloader
+        self.trainer_kwargs["eval_val_dataloader"] = eval_val_dataloader
 
         model = self.model_factory()
         self.trainer_kwargs["model"] = model
@@ -184,6 +195,8 @@ class OptimizationManager:
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("eval_batch_size", eval_batch_size)
+            mlflow.log_param("eval_use_amp", int(eval_use_amp))
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
@@ -218,6 +231,8 @@ mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
+mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
+mlflow.log_param("requested_eval_use_amp", int(eval_use_amp))
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -297,6 +312,7 @@ train_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=train_crop_dataset_idxs,
     split_name="training",
+    use_amp=eval_use_amp,
 )
 
 val_image_prediction_saver = SaveEpochCrops(
@@ -304,6 +320,7 @@ val_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=val_crop_dataset_idxs,
     split_name="validation",
+    use_amp=eval_use_amp,
 )
 
 callbacks_args = {
@@ -316,6 +333,7 @@ callbacks_args = {
     "image_postprocessor": image_postprocessor,
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
+    "eval_use_amp": eval_use_amp,
 }
 
 optimization_manager = OptimizationManager(
@@ -328,6 +346,7 @@ optimization_manager = OptimizationManager(
         out_channels=1,
         decoder_up_block="convt",
     ),
+    device=device,
     epochs=args.epochs,
     max_train_batches=max_train_batches,
 )
