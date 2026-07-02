@@ -105,13 +105,9 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+parser.add_argument("--eval-batch-size", type=int, default=-1)
 parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
 parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
-parser.add_argument(
-    "--amp-dtype",
-    choices=["bfloat16", "float16"],
-    default="bfloat16",
-)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
@@ -130,6 +126,7 @@ if args.parent_run_id == "":
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
+requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
 eval_use_amp = args.eval_use_amp == 1
 train_use_amp = args.train_use_amp == 1
 
@@ -310,11 +307,22 @@ class OptimizationManager:
         discriminator_updates_per_generator_update = trial.suggest_int(
             "discriminator_updates_per_generator_update", 1, 5
         )
+        eval_batch_size = (
+            batch_size
+            if requested_eval_batch_size is None
+            else requested_eval_batch_size
+        )
 
         # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
+        eval_train_dataloader, eval_val_dataloader, _ = self.hash_splitter.build_loaders(
+            batch_size=eval_batch_size,
+            train_shuffle=False,
+        )
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
+        self.trainer_kwargs["eval_train_dataloader"] = eval_train_dataloader
+        self.trainer_kwargs["eval_val_dataloader"] = eval_val_dataloader
 
         generator = self.generator_factory()
         discriminator = self.discriminator_factory()
@@ -385,6 +393,7 @@ class OptimizationManager:
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("gradient_penalty_importance", gradient_penalty_importance)
             mlflow.log_param("reconstruction_importance", reconstruction_importance)
             mlflow.log_param("adversarial_importance", 1.0)
@@ -393,7 +402,7 @@ class OptimizationManager:
                 discriminator_updates_per_generator_update,
             )
             mlflow.log_param("train_use_amp", int(train_use_amp))
-            mlflow.log_param("amp_dtype", args.amp_dtype)
+            mlflow.log_param("amp_dtype", "bfloat16")
             mlflow.log_param("gradient_penalty_precision", "float32")
             mlflow.set_tag(
                 "optimizer_class", generator_optimizer.__class__.__name__.lower()
@@ -453,9 +462,10 @@ class OptimizationManager:
                         "resume_status": resume_status,
                         "hyperparameters": {
                             "batch_size": batch_size,
+                            "eval_batch_size": eval_batch_size,
                             "lr": lr,
                             "train_use_amp": train_use_amp,
-                            "amp_dtype": args.amp_dtype,
+                            "amp_dtype": "bfloat16",
                             "gradient_penalty_importance": (
                                 gradient_penalty_importance
                             ),
@@ -543,10 +553,10 @@ study.set_user_attr("sampler_seed", 0)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if train_use_amp and device.type != "cuda":
     raise ValueError("train_use_amp requires a CUDA device in this training path.")
-if train_use_amp and args.amp_dtype == "bfloat16":
+if train_use_amp:
     is_bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)
     if not is_bf16_supported():
-        raise ValueError("amp_dtype=bfloat16 requires CUDA bfloat16 support.")
+        raise ValueError("train_use_amp requires CUDA bfloat16 support.")
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -560,9 +570,10 @@ mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
+mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
 mlflow.log_param("eval_use_amp", int(eval_use_amp))
 mlflow.log_param("train_use_amp", int(train_use_amp))
-mlflow.log_param("amp_dtype", args.amp_dtype)
+mlflow.log_param("amp_dtype", "bfloat16")
 mlflow.log_param("gradient_penalty_precision", "float32")
 mlflow.log_param("target_completed_trials", args.n_trials)
 
@@ -668,7 +679,6 @@ callbacks_args = {
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
     "eval_use_amp": eval_use_amp,
-    "eval_amp_dtype": args.amp_dtype,
 }
 
 optimization_manager = OptimizationManager(
@@ -690,7 +700,6 @@ optimization_manager = OptimizationManager(
     device=device,
     max_train_batches=max_train_batches,
     use_amp=train_use_amp,
-    amp_dtype=args.amp_dtype,
 )
 
 while count_completed_trials(study) < args.n_trials:

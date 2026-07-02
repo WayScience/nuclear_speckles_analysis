@@ -17,7 +17,6 @@ class EpochEvaluatorCallback(BaseCallback):
         image_postprocessor: Any = lambda x: x,
         max_eval_batches: int | None = None,
         use_amp: bool = False,
-        amp_dtype: torch.dtype | str = torch.bfloat16,
     ) -> None:
         """Initialize evaluation dependencies.
 
@@ -27,30 +26,14 @@ class EpochEvaluatorCallback(BaseCallback):
             image_postprocessor: Postprocessor applied when logits are not used.
             max_eval_batches: Optional cap on evaluation batches per split.
             use_amp: Whether to run evaluation inference under AMP.
-            amp_dtype: Explicit autocast dtype used for eval inference.
         """
         self.metrics = metrics
         self.loss = loss
         self.image_postprocessor = image_postprocessor
         self.max_eval_batches = max_eval_batches
         self.use_amp = use_amp
-        self.amp_dtype = self._normalize_amp_dtype(amp_dtype)
+        self.amp_dtype = torch.bfloat16
         self.compute_sigmoid = any(not metric.use_logits for metric in [*metrics, loss])
-
-    @staticmethod
-    def _normalize_amp_dtype(amp_dtype: torch.dtype | str) -> torch.dtype:
-        if isinstance(amp_dtype, torch.dtype):
-            if amp_dtype not in {torch.bfloat16, torch.float16}:
-                raise ValueError("amp_dtype must be torch.bfloat16 or torch.float16.")
-            return amp_dtype
-
-        amp_dtype_map = {
-            "bfloat16": torch.bfloat16,
-            "float16": torch.float16,
-        }
-        if amp_dtype not in amp_dtype_map:
-            raise ValueError("amp_dtype must be 'bfloat16' or 'float16'.")
-        return amp_dtype_map[amp_dtype]
 
     def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
         """Run evaluation on train and validation splits.
@@ -62,8 +45,14 @@ class EpochEvaluatorCallback(BaseCallback):
         model = hook_data["model"]
         epoch_metric_data: dict[str, float] = {}
         for data_split, dataloader in [
-            ("train", hook_data["train_dataloader"]),
-            ("validation", hook_data["val_dataloader"]),
+            (
+                "train",
+                hook_data.get("eval_train_dataloader", hook_data["train_dataloader"]),
+            ),
+            (
+                "validation",
+                hook_data.get("eval_val_dataloader", hook_data["val_dataloader"]),
+            ),
         ]:
             split_metric_data = self._evaluate_split(
                 model=model, dataloader=dataloader, data_split=data_split

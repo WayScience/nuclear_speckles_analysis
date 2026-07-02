@@ -1,7 +1,6 @@
 from typing import Any, Union
 
 import torch
-from torch.amp import GradScaler
 from torch.utils.data import DataLoader
 
 
@@ -29,7 +28,8 @@ class WGANGPTrainer:
         checkpoint_manager: Any = None,
         trial_metadata: dict[str, Any] | None = None,
         use_amp: bool = False,
-        amp_dtype: torch.dtype | str = torch.bfloat16,
+        eval_train_dataloader: Union[torch.utils.data.Dataset, DataLoader, None] = None,
+        eval_val_dataloader: Union[torch.utils.data.Dataset, DataLoader, None] = None,
     ) -> None:
         """Store one training run's modules, loaders, and resume state.
 
@@ -55,7 +55,8 @@ class WGANGPTrainer:
             checkpoint_manager: Optional resumable checkpoint writer.
             trial_metadata: Trial metadata persisted alongside checkpoints.
             use_amp: Whether to run standard training forwards under AMP.
-            amp_dtype: Lower-precision autocast dtype for eligible operations.
+            eval_train_dataloader: Optional dataloader used for epoch-end train metrics.
+            eval_val_dataloader: Optional dataloader used for epoch-end validation metrics.
         """
         if discriminator_updates_per_generator_update <= 0:
             raise ValueError(
@@ -88,32 +89,20 @@ class WGANGPTrainer:
         self.trial_metadata = trial_metadata or {}
         self.last_completed_epoch = start_epoch - 1
         self.use_amp = use_amp
-        self.amp_dtype = self._normalize_amp_dtype(amp_dtype)
+        self.amp_dtype = torch.bfloat16
+        self.eval_train_dataloader = (
+            train_dataloader if eval_train_dataloader is None else eval_train_dataloader
+        )
+        self.eval_val_dataloader = (
+            val_dataloader if eval_val_dataloader is None else eval_val_dataloader
+        )
         self.scaler = self._build_scaler()
 
     @property
     def best_loss_value(self):
         return self.callbacks.best_loss_value
 
-    def _normalize_amp_dtype(self, amp_dtype: torch.dtype | str) -> torch.dtype:
-        if isinstance(amp_dtype, torch.dtype):
-            if amp_dtype not in {torch.bfloat16, torch.float16}:
-                raise ValueError("amp_dtype must be torch.bfloat16 or torch.float16.")
-            return amp_dtype
-
-        amp_dtype_map = {
-            "bfloat16": torch.bfloat16,
-            "float16": torch.float16,
-        }
-        if amp_dtype not in amp_dtype_map:
-            raise ValueError("amp_dtype must be 'bfloat16' or 'float16'.")
-        return amp_dtype_map[amp_dtype]
-
-    def _build_scaler(self) -> GradScaler | None:
-        if not self.use_amp or self.device.type != "cuda":
-            return None
-        if self.amp_dtype == torch.float16:
-            return GradScaler("cuda")
+    def _build_scaler(self) -> None:
         return None
 
     def _backward_and_step(
@@ -135,7 +124,6 @@ class WGANGPTrainer:
         scaler_state = self.scaler.state_dict() if self.scaler is not None else None
         return {
             "use_amp": self.use_amp,
-            "amp_dtype": str(self.amp_dtype).removeprefix("torch."),
             "scaler_state_dict": scaler_state,
         }
 
@@ -287,6 +275,8 @@ class WGANGPTrainer:
             train_data["continue_training"] = self.callbacks(
                 train_dataloader=self.train_dataloader,
                 val_dataloader=self.val_dataloader,
+                eval_train_dataloader=self.eval_train_dataloader,
+                eval_val_dataloader=self.eval_val_dataloader,
                 **train_data,
             )
             self.last_completed_epoch = epoch

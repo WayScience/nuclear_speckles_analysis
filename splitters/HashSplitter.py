@@ -50,11 +50,14 @@ class HashSplitter:
             else:
                 self.splits["test"].append(idx)
 
-    def __call__(self, batch_size: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    def build_loaders(
+        self, batch_size: int, train_shuffle: bool = True
+    ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """Build dataloaders for train/validation/test splits.
 
         Args:
             batch_size: Batch size for all returned dataloaders.
+            train_shuffle: Whether to shuffle the training split loader.
 
         Returns:
             Tuple of ``(train_loader, val_loader, test_loader)``.
@@ -75,7 +78,12 @@ class HashSplitter:
 
         self.dataset.split_data = False
         return (
-            make_loader(self.splits["train"], shuffle=True),
+            make_loader(self.splits["train"], shuffle=train_shuffle),
             make_loader(self.splits["val"], shuffle=False),
             make_loader(self.splits["test"], shuffle=False),
         )
+
+    def __call__(self, batch_size: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
+        """Build dataloaders for train/validation/test splits."""
+
+        return self.build_loaders(batch_size=batch_size, train_shuffle=True)
