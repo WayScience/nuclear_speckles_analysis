@@ -28,6 +28,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
         self.image_postprocessor = image_postprocessor
         self.use_amp = use_amp
+        self.amp_dtype = torch.bfloat16
         self.best_loss_value = float("inf")
         self.early_stopping_counter = 0
 
@@ -84,6 +85,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
             with torch.amp.autocast(
                 enabled=self.use_amp,
                 device_type=input_example.device.type,
+                dtype=self.amp_dtype,
             ):
                 output_example = (
                     self.image_postprocessor(model(input_example))

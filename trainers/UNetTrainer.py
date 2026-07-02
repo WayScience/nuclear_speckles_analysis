@@ -58,6 +58,7 @@ class UNetTrainer:
             device if isinstance(device, torch.device) else torch.device(device)
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
+        self.amp_dtype = torch.bfloat16
         self.eval_train_dataloader = (
             train_dataloader if eval_train_dataloader is None else eval_train_dataloader
         )
@@ -67,14 +68,6 @@ class UNetTrainer:
         self.max_train_batches = max_train_batches
         # Stable loss identifier used to namespace batch metrics in MLflow.
         self.loss_name = getattr(self.model_loss, "loss_name", self.model_loss.__class__.__name__)
-
-        if self.use_amp:
-            if self.device.type == "cuda":
-                self.scaler = torch.amp.GradScaler("cuda")
-            else:
-                self.scaler = torch.amp.GradScaler("cpu")
-        else:
-            self.scaler = None
 
     @property
     def best_loss_value(self):
@@ -119,7 +112,9 @@ class UNetTrainer:
                 targets = batch_data["target"].to(self.device)
 
                 with torch.amp.autocast(
-                    enabled=self.use_amp, device_type=self.device.type
+                    enabled=self.use_amp,
+                    device_type=self.device.type,
+                    dtype=self.amp_dtype,
                 ):
                     generated_predictions = self.image_postprocessor(self.model(inputs))
                     batch_loss_components = self.model_loss(
@@ -151,13 +146,8 @@ class UNetTrainer:
                 train_data["batch_loss_name"] = self.loss_name
 
                 self.model_optimizer.zero_grad()
-                if self.use_amp and self.scaler is not None:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.step(self.model_optimizer)
-                    self.scaler.update()
-                else:
-                    loss.backward()
-                    self.model_optimizer.step()
+                loss.backward()
+                self.model_optimizer.step()
 
                 train_data["model"] = self.model
                 train_data["callback_hook"] = "on_batch_end"

@@ -99,17 +99,28 @@ parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--eval-batch-size", type=int, default=-1)
 parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
+parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 parser.add_argument("--crop-size", type=int, default=256)
+parser.add_argument("--study-name", type=str, default="model_training")
+parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
+parser.add_argument(
+    "--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints")
+)
+parser.add_argument("--resume", type=int, choices=[0, 1], default=1)
+parser.add_argument("--parent-run-id", type=str, default=None)
 args = parser.parse_args()
+if args.parent_run_id == "":
+    args.parent_run_id = None
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
 requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
 eval_use_amp = args.eval_use_amp == 1
+train_use_amp = args.train_use_amp == 1
 
 
 class OptimizationManager:
@@ -197,6 +208,7 @@ class OptimizationManager:
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("eval_use_amp", int(eval_use_amp))
+            mlflow.log_param("train_use_amp", int(train_use_amp))
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
@@ -223,6 +235,8 @@ if args.crop_size <= 0:
 
 # Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if train_use_amp and device.type == "cuda" and not torch.cuda.is_bf16_supported():
+    raise ValueError("train_use_amp requires CUDA bfloat16 support on this device.")
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -233,6 +247,13 @@ mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
 mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
 mlflow.log_param("requested_eval_use_amp", int(eval_use_amp))
+mlflow.log_param("requested_train_use_amp", int(train_use_amp))
+mlflow.log_param("study_name", args.study_name)
+mlflow.log_param("optuna_storage", args.optuna_storage)
+mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
+mlflow.log_param("resume", args.resume)
+mlflow.log_param("parent_run_id", args.parent_run_id or "")
+mlflow.log_param("amp_dtype", "bfloat16")
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -346,10 +367,16 @@ optimization_manager = OptimizationManager(
     ),
     device=device,
     epochs=args.epochs,
+    use_amp=train_use_amp,
     max_train_batches=max_train_batches,
 )
 
-study = optuna.create_study(study_name="model_training", direction="minimize")
+study = optuna.create_study(
+    study_name=args.study_name,
+    direction="minimize",
+    storage=args.optuna_storage,
+    load_if_exists=args.resume == 1,
+)
 study.optimize(optimization_manager, n_trials=args.n_trials)
 
 joblib.dump(study, "optuna_study.joblib")

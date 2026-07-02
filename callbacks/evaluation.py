@@ -32,6 +32,7 @@ class EpochEvaluatorCallback(BaseCallback):
         self.image_postprocessor = image_postprocessor
         self.max_eval_batches = max_eval_batches
         self.use_amp = use_amp
+        self.amp_dtype = torch.bfloat16
         self.compute_sigmoid = any(not metric.use_logits for metric in [*metrics, loss])
 
     def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
@@ -81,6 +82,7 @@ class EpochEvaluatorCallback(BaseCallback):
                 with torch.amp.autocast(
                     enabled=self.use_amp,
                     device_type=samples["input"].device.type,
+                    dtype=self.amp_dtype,
                 ):
                     generated_predictions = model(samples["input"])
                     sigmoid_generated_predictions = generated_predictions.clone()
