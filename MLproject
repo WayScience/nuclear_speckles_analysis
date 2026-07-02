@@ -8,6 +8,7 @@ entry_points:
       n_trials: {type: int, default: 4}
       max_train_batches: {type: int, default: -1}
       max_eval_batches: {type: int, default: -1}
+      eval_batch_size: {type: int, default: -1}
       eval_use_amp: {type: int, default: 0}
       train_use_amp: {type: int, default: 1}
       enable_image_savers: {type: int, default: 1}
@@ -25,6 +26,7 @@ entry_points:
       --n-trials {n_trials}
       --max-train-batches {max_train_batches}
       --max-eval-batches {max_eval_batches}
+      --eval-batch-size {eval_batch_size}
       --eval-use-amp {eval_use_amp}
       --train-use-amp {train_use_amp}
       --enable-image-savers {enable_image_savers}
