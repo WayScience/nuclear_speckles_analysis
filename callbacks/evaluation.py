@@ -16,6 +16,7 @@ class EpochEvaluatorCallback(BaseCallback):
         loss: Module,
         image_postprocessor: Any = lambda x: x,
         max_eval_batches: int | None = None,
+        use_amp: bool = False,
     ) -> None:
         """Initialize evaluation dependencies.
 
@@ -24,11 +25,13 @@ class EpochEvaluatorCallback(BaseCallback):
             loss: Loss metric object updated on each evaluation batch.
             image_postprocessor: Postprocessor applied when logits are not used.
             max_eval_batches: Optional cap on evaluation batches per split.
+            use_amp: Whether to run evaluation inference under AMP.
         """
         self.metrics = metrics
         self.loss = loss
         self.image_postprocessor = image_postprocessor
         self.max_eval_batches = max_eval_batches
+        self.use_amp = use_amp
         self.compute_sigmoid = any(not metric.use_logits for metric in [*metrics, loss])
 
     def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
@@ -68,14 +71,18 @@ class EpochEvaluatorCallback(BaseCallback):
         model.eval()
         with torch.no_grad():
             for batch_idx, samples in enumerate(dataloader):
-                generated_predictions = model(samples["input"])
-                sigmoid_generated_predictions = generated_predictions.clone()
+                with torch.amp.autocast(
+                    enabled=self.use_amp,
+                    device_type=samples["input"].device.type,
+                ):
+                    generated_predictions = model(samples["input"])
+                    sigmoid_generated_predictions = generated_predictions.clone()
 
-                # Only postprocess if any metric/loss expects non-logit values.
-                if self.compute_sigmoid:
-                    sigmoid_generated_predictions = self.image_postprocessor(
-                        generated_predictions
-                    )
+                    # Only postprocess if any metric/loss expects non-logit values.
+                    if self.compute_sigmoid:
+                        sigmoid_generated_predictions = self.image_postprocessor(
+                            generated_predictions
+                        )
 
                 self.loss.update(
                     generated_predictions=(

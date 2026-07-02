@@ -16,6 +16,7 @@ class SaveEpochCrops:
         image_postprocessor: Any = lambda x: x,
         image_dataset_idxs: Optional[list[int]] = None,
         split_name: str = "validation",
+        use_amp: bool = False,
     ) -> None:
         """Initialize epoch-wise crop saving configuration.
 
@@ -24,6 +25,7 @@ class SaveEpochCrops:
             image_postprocessor: Transform applied to model predictions before saving.
             image_dataset_idxs: Optional dataset indices to save each epoch.
             split_name: Split label used in artifact paths (for example, training).
+            use_amp: Whether to run sample-image inference under AMP.
         """
 
         self.image_dataset = image_dataset
@@ -32,6 +34,7 @@ class SaveEpochCrops:
             range(len(image_dataset)) if image_dataset_idxs is None else image_dataset_idxs
         )
         self.split_name = split_name
+        self.use_amp = use_amp
 
     def save_image(
         self,
@@ -95,7 +98,11 @@ class SaveEpochCrops:
         """
 
         with torch.no_grad():
-            prediction = model(image.unsqueeze(0)).squeeze(0)
+            with torch.amp.autocast(
+                enabled=self.use_amp,
+                device_type=image.device.type,
+            ):
+                prediction = model(image.unsqueeze(0)).squeeze(0)
         return self.image_postprocessor(prediction)
 
     def __call__(self, model: torch.nn.Module, epoch: int) -> None:

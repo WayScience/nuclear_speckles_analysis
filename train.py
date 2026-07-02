@@ -105,6 +105,7 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
@@ -123,6 +124,7 @@ if args.parent_run_id == "":
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
+eval_use_amp = args.eval_use_amp == 1
 
 
 def ensure_parent_mlflow_run(
@@ -534,6 +536,7 @@ mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
+mlflow.log_param("eval_use_amp", int(eval_use_amp))
 mlflow.log_param("target_completed_trials", args.n_trials)
 
 description = """
@@ -618,6 +621,7 @@ train_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=train_crop_dataset_idxs,
     split_name="training",
+    use_amp=eval_use_amp,
 )
 
 val_image_prediction_saver = SaveEpochCrops(
@@ -625,6 +629,7 @@ val_image_prediction_saver = SaveEpochCrops(
     image_postprocessor=image_postprocessor,
     image_dataset_idxs=val_crop_dataset_idxs,
     split_name="validation",
+    use_amp=eval_use_amp,
 )
 
 callbacks_args = {
@@ -637,6 +642,7 @@ callbacks_args = {
     "image_postprocessor": image_postprocessor,
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
+    "eval_use_amp": eval_use_amp,
 }
 
 optimization_manager = OptimizationManager(

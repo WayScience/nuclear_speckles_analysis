@@ -16,15 +16,18 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         self,
         early_stopping_counter_threshold: int,
         image_postprocessor: Any = lambda x: x,
+        use_amp: bool = False,
     ) -> None:
         """Initialize early-stopping and checkpoint state.
 
         Args:
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
             image_postprocessor: Postprocessor used before signature inference.
+            use_amp: Whether to run signature inference under AMP.
         """
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
         self.image_postprocessor = image_postprocessor
+        self.use_amp = use_amp
         self.best_loss_value = float("inf")
         self.early_stopping_counter = 0
 
@@ -78,9 +81,17 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
 
         model.eval()
         with torch.no_grad():
-            output_example = (
-                self.image_postprocessor(model(input_example)).detach().cpu().numpy()
-            )
+            with torch.amp.autocast(
+                enabled=self.use_amp,
+                device_type=input_example.device.type,
+            ):
+                output_example = (
+                    self.image_postprocessor(model(input_example))
+                    .detach()
+                    .float()
+                    .cpu()
+                    .numpy()
+                )
 
         input_numpy = input_example.detach().cpu().numpy().astype("float32")
         return infer_signature(input_numpy, output_example)
