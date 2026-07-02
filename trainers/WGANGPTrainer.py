@@ -1,6 +1,7 @@
 from typing import Any, Union
 
 import torch
+from torch.amp import GradScaler
 from torch.utils.data import DataLoader
 
 
@@ -27,6 +28,8 @@ class WGANGPTrainer:
         start_epoch: int = 0,
         checkpoint_manager: Any = None,
         trial_metadata: dict[str, Any] | None = None,
+        use_amp: bool = False,
+        amp_dtype: torch.dtype | str = torch.bfloat16,
     ) -> None:
         """Store one training run's modules, loaders, and resume state.
 
@@ -51,6 +54,8 @@ class WGANGPTrainer:
             start_epoch: Epoch index to resume from.
             checkpoint_manager: Optional resumable checkpoint writer.
             trial_metadata: Trial metadata persisted alongside checkpoints.
+            use_amp: Whether to run standard training forwards under AMP.
+            amp_dtype: Lower-precision autocast dtype for eligible operations.
         """
         if discriminator_updates_per_generator_update <= 0:
             raise ValueError(
@@ -82,10 +87,65 @@ class WGANGPTrainer:
         self.checkpoint_manager = checkpoint_manager
         self.trial_metadata = trial_metadata or {}
         self.last_completed_epoch = start_epoch - 1
+        self.use_amp = use_amp
+        self.amp_dtype = self._normalize_amp_dtype(amp_dtype)
+        self.scaler = self._build_scaler()
 
     @property
     def best_loss_value(self):
         return self.callbacks.best_loss_value
+
+    def _normalize_amp_dtype(self, amp_dtype: torch.dtype | str) -> torch.dtype:
+        if isinstance(amp_dtype, torch.dtype):
+            if amp_dtype not in {torch.bfloat16, torch.float16}:
+                raise ValueError("amp_dtype must be torch.bfloat16 or torch.float16.")
+            return amp_dtype
+
+        amp_dtype_map = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+        }
+        if amp_dtype not in amp_dtype_map:
+            raise ValueError("amp_dtype must be 'bfloat16' or 'float16'.")
+        return amp_dtype_map[amp_dtype]
+
+    def _build_scaler(self) -> GradScaler | None:
+        if not self.use_amp or self.device.type != "cuda":
+            return None
+        if self.amp_dtype == torch.float16:
+            return GradScaler("cuda")
+        return None
+
+    def _backward_and_step(
+        self,
+        *,
+        loss: torch.Tensor,
+        optimizer: torch.optim.Optimizer,
+    ) -> None:
+        if self.scaler is not None:
+            self.scaler.scale(loss).backward()
+            self.scaler.step(optimizer)
+            self.scaler.update()
+            return
+
+        loss.backward()
+        optimizer.step()
+
+    def amp_state_dict(self) -> dict[str, Any]:
+        scaler_state = self.scaler.state_dict() if self.scaler is not None else None
+        return {
+            "use_amp": self.use_amp,
+            "amp_dtype": str(self.amp_dtype).removeprefix("torch."),
+            "scaler_state_dict": scaler_state,
+        }
+
+    def load_amp_state_dict(self, state_dict: dict[str, Any]) -> None:
+        if self.scaler is None:
+            return
+
+        scaler_state_dict = state_dict.get("scaler_state_dict")
+        if scaler_state_dict is not None:
+            self.scaler.load_state_dict(scaler_state_dict)
 
     @staticmethod
     def _detach_components(
@@ -132,9 +192,14 @@ class WGANGPTrainer:
                 targets = batch_data["target"].to(self.device)
 
                 with torch.no_grad():
-                    fake_targets_for_discriminator = self.image_postprocessor(
-                        self.generator(inputs)
-                    )
+                    with torch.amp.autocast(
+                        enabled=self.use_amp,
+                        device_type=self.device.type,
+                        dtype=self.amp_dtype,
+                    ):
+                        fake_targets_for_discriminator = self.image_postprocessor(
+                            self.generator(inputs)
+                        )
                 discriminator_outputs = self.discriminator_loss(
                     critic=self.discriminator,
                     real_samples=targets,
@@ -145,8 +210,10 @@ class WGANGPTrainer:
                 )
 
                 self.discriminator_optimizer.zero_grad()
-                discriminator_loss.backward()
-                self.discriminator_optimizer.step()
+                self._backward_and_step(
+                    loss=discriminator_loss,
+                    optimizer=self.discriminator_optimizer,
+                )
                 self.discriminator_steps_since_generator_update += 1
 
                 train_data.pop("generated_predictions", None)
@@ -161,25 +228,32 @@ class WGANGPTrainer:
                     self.discriminator_steps_since_generator_update
                     >= self.discriminator_updates_per_generator_update
                 ):
-                    generated_predictions = self.image_postprocessor(
-                        self.generator(inputs)
-                    )
-                    fake_classification_outputs = self.discriminator(
-                        generated_predictions
-                    )
-                    generator_outputs = self.generator_loss(
-                        fake_classification_outputs=fake_classification_outputs,
-                        generated_predictions=generated_predictions,
-                        targets=targets,
-                        loss_mask=batch_data.get("loss_mask"),
-                    )
+                    with torch.amp.autocast(
+                        enabled=self.use_amp,
+                        device_type=self.device.type,
+                        dtype=self.amp_dtype,
+                    ):
+                        generated_predictions = self.image_postprocessor(
+                            self.generator(inputs)
+                        )
+                        fake_classification_outputs = self.discriminator(
+                            generated_predictions
+                        )
+                        generator_outputs = self.generator_loss(
+                            fake_classification_outputs=fake_classification_outputs,
+                            generated_predictions=generated_predictions,
+                            targets=targets,
+                            loss_mask=batch_data.get("loss_mask"),
+                        )
                     generator_loss, generator_components = self._detach_components(
                         generator_outputs
                     )
 
                     self.generator_optimizer.zero_grad()
-                    generator_loss.backward()
-                    self.generator_optimizer.step()
+                    self._backward_and_step(
+                        loss=generator_loss,
+                        optimizer=self.generator_optimizer,
+                    )
                     self.discriminator_steps_since_generator_update = 0
 
                     train_data["generated_predictions"] = generated_predictions
@@ -230,6 +304,7 @@ class WGANGPTrainer:
                     discriminator_steps_since_generator_update=(
                         self.discriminator_steps_since_generator_update
                     ),
+                    amp_state=self.amp_state_dict(),
                     trial_metadata={
                         **self.trial_metadata,
                         "last_completed_epoch": epoch,

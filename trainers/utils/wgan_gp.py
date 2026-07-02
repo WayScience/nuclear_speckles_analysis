@@ -29,30 +29,40 @@ def compute_wgan_gp_primitives(
     if real_samples.size(0) != fake_samples.size(0):
         raise ValueError("real_samples and fake_samples must have matching batch size.")
 
-    batch_size = real_samples.size(0)
-    alpha_shape = (batch_size,) + (1,) * (real_samples.dim() - 1)
-    alpha = torch.rand(alpha_shape, device=real_samples.device, dtype=real_samples.dtype)
+    with torch.amp.autocast(device_type=real_samples.device.type, enabled=False):
+        # Keep the gradient-penalty path in fp32 because this term directly
+        # regularizes critic input-gradient norms and is more numerically fragile
+        # than the ordinary generator/critic forward passes.
+        real_samples = real_samples.float()
+        fake_samples = fake_samples.float()
+        batch_size = real_samples.size(0)
+        alpha_shape = (batch_size,) + (1,) * (real_samples.dim() - 1)
+        alpha = torch.rand(
+            alpha_shape,
+            device=real_samples.device,
+            dtype=torch.float32,
+        )
 
-    interpolated_samples = (
-        alpha * real_samples + (1.0 - alpha) * fake_samples
-    ).requires_grad_(True)
+        interpolated_samples = (
+            alpha * real_samples + (1.0 - alpha) * fake_samples
+        ).requires_grad_(True)
 
-    interpolated_outputs = critic(interpolated_samples)
-    real_classification_outputs = critic(real_samples)
-    fake_classification_outputs = critic(fake_samples)
+        interpolated_outputs = critic(interpolated_samples)
+        real_classification_outputs = critic(real_samples)
+        fake_classification_outputs = critic(fake_samples)
 
-    if interpolated_outputs.numel() == 0:
-        raise ValueError("critic output for interpolated samples must not be empty.")
+        if interpolated_outputs.numel() == 0:
+            raise ValueError("critic output for interpolated samples must not be empty.")
 
-    grad_outputs = torch.ones_like(interpolated_outputs)
-    gradients = torch.autograd.grad(
-        outputs=interpolated_outputs,
-        inputs=interpolated_samples,
-        grad_outputs=grad_outputs,
-        create_graph=True,
-        retain_graph=True,
-        only_inputs=True,
-    )[0]
+        grad_outputs = torch.ones_like(interpolated_outputs)
+        gradients = torch.autograd.grad(
+            outputs=interpolated_outputs,
+            inputs=interpolated_samples,
+            grad_outputs=grad_outputs,
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True,
+        )[0]
 
     return {
         "gradients": gradients,

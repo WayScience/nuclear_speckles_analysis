@@ -106,6 +106,12 @@ parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
 parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
+parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
+parser.add_argument(
+    "--amp-dtype",
+    choices=["bfloat16", "float16"],
+    default="bfloat16",
+)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
@@ -125,6 +131,7 @@ if args.parent_run_id == "":
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
 eval_use_amp = args.eval_use_amp == 1
+train_use_amp = args.train_use_amp == 1
 
 
 def ensure_parent_mlflow_run(
@@ -385,6 +392,9 @@ class OptimizationManager:
                 "discriminator_updates_per_generator_update",
                 discriminator_updates_per_generator_update,
             )
+            mlflow.log_param("train_use_amp", int(train_use_amp))
+            mlflow.log_param("amp_dtype", args.amp_dtype)
+            mlflow.log_param("gradient_penalty_precision", "float32")
             mlflow.set_tag(
                 "optimizer_class", generator_optimizer.__class__.__name__.lower()
             )
@@ -400,6 +410,7 @@ class OptimizationManager:
 
             start_epoch = 0
             discriminator_steps_since_generator_update = 0
+            checkpoint_data = None
             if checkpoint_manager.exists():
                 # Resume trial state before any training/logging steps are replayed.
                 checkpoint_data = checkpoint_manager.load(map_location=device)
@@ -443,6 +454,8 @@ class OptimizationManager:
                         "hyperparameters": {
                             "batch_size": batch_size,
                             "lr": lr,
+                            "train_use_amp": train_use_amp,
+                            "amp_dtype": args.amp_dtype,
                             "gradient_penalty_importance": (
                                 gradient_penalty_importance
                             ),
@@ -451,9 +464,13 @@ class OptimizationManager:
                                 discriminator_updates_per_generator_update
                             ),
                         },
+                        "gradient_penalty_precision": "float32",
                     },
                 }
             )
+
+            if checkpoint_data is not None:
+                trainer_obj.load_amp_state_dict(checkpoint_data.get("amp_state", {}))
 
             if not checkpoint_manager.exists():
                 # Save trial-start state so interruptions before epoch 1 remain resumable.
@@ -467,6 +484,7 @@ class OptimizationManager:
                     discriminator_steps_since_generator_update=(
                         trainer_obj.discriminator_steps_since_generator_update
                     ),
+                    amp_state=trainer_obj.amp_state_dict(),
                     trial_metadata={
                         "trial_number": trial.number,
                         "trial_run_id": trial_run.info.run_id,
@@ -523,6 +541,12 @@ study.set_user_attr("sampler_seed", 0)
 
 # Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if train_use_amp and device.type != "cuda":
+    raise ValueError("train_use_amp requires a CUDA device in this training path.")
+if train_use_amp and args.amp_dtype == "bfloat16":
+    is_bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)
+    if not is_bf16_supported():
+        raise ValueError("amp_dtype=bfloat16 requires CUDA bfloat16 support.")
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -537,6 +561,9 @@ mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
 mlflow.log_param("eval_use_amp", int(eval_use_amp))
+mlflow.log_param("train_use_amp", int(train_use_amp))
+mlflow.log_param("amp_dtype", args.amp_dtype)
+mlflow.log_param("gradient_penalty_precision", "float32")
 mlflow.log_param("target_completed_trials", args.n_trials)
 
 description = """
@@ -661,6 +688,8 @@ optimization_manager = OptimizationManager(
     image_postprocessor=image_postprocessor,
     device=device,
     max_train_batches=max_train_batches,
+    use_amp=train_use_amp,
+    amp_dtype=args.amp_dtype,
 )
 
 while count_completed_trials(study) < args.n_trials:

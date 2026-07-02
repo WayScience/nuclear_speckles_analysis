@@ -36,6 +36,7 @@ class TrialCheckpointManager:
         callbacks_state: dict[str, Any],
         discriminator_steps_since_generator_update: int,
         trial_metadata: dict[str, Any],
+        amp_state: dict[str, Any] | None = None,
     ) -> None:
         """Atomically write the latest resumable checkpoint for a trial.
 
@@ -48,6 +49,7 @@ class TrialCheckpointManager:
             callbacks_state: Serializable callback-side training state.
             discriminator_steps_since_generator_update: WGAN-GP update cadence state.
             trial_metadata: Human-readable metadata mirrored into ``metadata.json``.
+            amp_state: Optional serialized AMP/scaler state required for resume.
         """
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,6 +65,7 @@ class TrialCheckpointManager:
             ),
             "trial_metadata": trial_metadata,
             "rng_state": self._capture_rng_state(),
+            "amp_state": amp_state or {},
         }
 
         temp_checkpoint_path = self.latest_checkpoint_path.with_suffix(".pt.tmp")
