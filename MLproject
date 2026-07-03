@@ -14,7 +14,7 @@ entry_points:
       enable_image_savers: {type: int, default: 1}
       batch_metric_log_every_n: {type: int, default: 1}
       crop_size: {type: int, default: 256}
-      study_name: {type: str, default: "model_training"}
+      study_name: {type: str, default: ""}
       optuna_storage: {type: str, default: "sqlite:///optuna_study.db"}
       checkpoint_root: {type: str, default: "trial_checkpoints"}
       resume: {type: int, default: 1}

@@ -104,7 +104,7 @@ parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 parser.add_argument("--crop-size", type=int, default=256)
-parser.add_argument("--study-name", type=str, default="model_training")
+parser.add_argument("--study-name", type=str, default=None)
 parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
 parser.add_argument(
     "--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints")
@@ -114,6 +114,8 @@ parser.add_argument("--parent-run-id", type=str, default=None)
 args = parser.parse_args()
 if args.parent_run_id == "":
     args.parent_run_id = None
+if args.study_name == "":
+    args.study_name = None
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
@@ -248,11 +250,9 @@ mlflow.log_param("crop_size", args.crop_size)
 mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
 mlflow.log_param("requested_eval_use_amp", int(eval_use_amp))
 mlflow.log_param("requested_train_use_amp", int(train_use_amp))
-mlflow.log_param("study_name", args.study_name)
 mlflow.log_param("optuna_storage", args.optuna_storage)
 mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
 mlflow.log_param("resume", args.resume)
-mlflow.log_param("parent_run_id", args.parent_run_id or "")
 mlflow.log_param("amp_dtype", "bfloat16")
 
 description = """
