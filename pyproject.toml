@@ -26,6 +26,11 @@ dependencies = [
     "timm>=1.0.22",
 ]
 
+[dependency-groups]
+migration = [
+    "mlflow-export-import @ git+https://github.com/mlflow/mlflow-export-import",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
