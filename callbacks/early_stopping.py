@@ -10,21 +10,29 @@ from callbacks.base import BaseCallback
 
 
 class EarlyStoppingAndCheckpointCallback(BaseCallback):
-    """Track best loss, save checkpoints, and control early stopping."""
+    """Track best loss, save checkpoints, and control early stopping.
+
+    The callback also infers an MLflow model signature from one validation
+    sample using the same evaluation inference mode configured for callbacks.
+    """
 
     def __init__(
         self,
         early_stopping_counter_threshold: int,
         image_postprocessor: Any = lambda x: x,
+        use_amp: bool = False,
     ) -> None:
         """Initialize early-stopping and checkpoint state.
 
         Args:
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
             image_postprocessor: Postprocessor used before signature inference.
+            use_amp: Whether to run signature inference under AMP autocast.
         """
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
         self.image_postprocessor = image_postprocessor
+        self.use_amp = use_amp
+        self.amp_dtype = torch.bfloat16
         self.best_loss_value = float("inf")
         self.early_stopping_counter = 0
 
@@ -37,10 +45,10 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
 
         epoch = hook_data["epoch"]
         model = hook_data["model"]
-        val_dataloader = hook_data["val_dataloader"]
+        val_dataloader = hook_data.get("eval_val_dataloader", hook_data["val_dataloader"])
         loss_value = hook_data["loss_value"]
 
-        # Reuse one validation sample to keep model signature logging lightweight.
+        # Reuse one validation sample to keep signature inference lightweight.
         val_sample = next(iter(val_dataloader))
         signature = self._prepare_signature(input_example=val_sample["input"], model=model)
 
@@ -78,9 +86,18 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
 
         model.eval()
         with torch.no_grad():
-            output_example = (
-                self.image_postprocessor(model(input_example)).detach().cpu().numpy()
-            )
+            with torch.amp.autocast(
+                enabled=self.use_amp,
+                device_type=input_example.device.type,
+                dtype=self.amp_dtype,
+            ):
+                output_example = (
+                    self.image_postprocessor(model(input_example))
+                    .detach()
+                    .float()
+                    .cpu()
+                    .numpy()
+                )
 
         input_numpy = input_example.detach().cpu().numpy().astype("float32")
         return infer_signature(input_numpy, output_example)

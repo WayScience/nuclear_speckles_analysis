@@ -1,4 +1,11 @@
+"""Train and optimize DAPI-to-Gold image-to-image models.
+
+This script prepares cached crop datasets, builds deterministic data splits,
+launches Optuna trials, and logs run metadata and artifacts with MLflow.
+"""
+
 import argparse
+import math
 import pathlib
 import random
 from dataclasses import dataclass
@@ -9,16 +16,13 @@ import mlflow
 import numpy as np
 import optuna
 import torch
-from models.convnext_unet.unext import ConvNeXtUNet
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache,
-    load_cache_manifest,
-)
+    ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1Loss import L1Loss
@@ -27,8 +31,10 @@ from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
+from models.convnext_unet.unext import ConvNeXtUNet
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -53,17 +59,19 @@ class DatasetConfig:
     holdout_plate: str | None = None
 
 
+# Shared root for dataset-specific image directories, profiles, and caches.
+speckle_dataset_path = pathlib.Path("/mnt/big_drive/nuclear_speckle_data").resolve(
+    strict=True
+)
+u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "initial_dataset"
+
 DATASET_CONFIGS = {
     "u2os": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache"
-        ),
+        image_dir=u2os_dataset_path / "u20s_images/tiffs",
+        parquet_path=u2os_dataset_path
+        / "u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet",
+        cache_root=u2os_dataset_path / "model_cache",
         input_channel="CH01",
         target_channel="CH03",
         metadata_column_map={
@@ -73,15 +81,9 @@ DATASET_CONFIGS = {
         holdout_plate="Rep3",
     ),
     "initial": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/IC_corrected_images"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/Preprocessed_data/cleaned_sc_profiles"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache"
-        ),
+        image_dir=initial_dataset_path / "IC_corrected_images",
+        parquet_path=initial_dataset_path / "Preprocessed_data/cleaned_sc_profiles",
+        cache_root=initial_dataset_path / "model_cache",
         input_channel="CH0",
         target_channel="CH2",
         metadata_column_map={
@@ -103,15 +105,37 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+# Evaluation can use a different batch size than optimization to make
+# epoch-end metric passes easier to fit on available hardware.
+parser.add_argument("--eval-batch-size", type=int, default=-1)
+parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
+parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 parser.add_argument("--crop-size", type=int, default=256)
+# Study metadata is passed through to Optuna storage so repeated runs can target
+# a stable study name and backing database.
+parser.add_argument("--study-name", type=str, default=None)
+parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
+parser.add_argument(
+    "--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints")
+)
+parser.add_argument("--resume", type=int, choices=[0, 1], default=1)
+parser.add_argument("--parent-run-id", type=str, default=None)
 args = parser.parse_args()
+if args.parent_run_id == "":
+    args.parent_run_id = None
+if args.study_name == "":
+    args.study_name = None
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
+requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
+eval_use_amp = args.eval_use_amp == 1
+train_use_amp = args.train_use_amp == 1
+max_batch_size = 8
 
 
 class OptimizationManager:
@@ -154,14 +178,29 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
-        # Let Optuna choose a mini-batch size and learning rate for this trial.
-        batch_size = trial.suggest_int("batch_size", 1, 8)
-        lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        # Couple learning rate to batch size so Optuna searches a scaling factor
+        # while the derived rate stays within the previous learning-rate bounds.
+        batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
+        lr_factor = trial.suggest_float(
+            "lr_factor",
+            1e-5,
+            1e-3 / math.sqrt(max_batch_size),
+            log=True,
+        )
+        lr = lr_factor * math.sqrt(batch_size)
+        eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
-        # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
+        # Optimization can tune the training batch size without forcing the same
+        # setting on epoch-end evaluation passes.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
+        eval_train_dataloader, eval_val_dataloader, _ = self.hash_splitter.build_loaders(
+            batch_size=eval_batch_size,
+            train_shuffle=False,
+        )
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
+        self.trainer_kwargs["eval_train_dataloader"] = eval_train_dataloader
+        self.trainer_kwargs["eval_val_dataloader"] = eval_val_dataloader
 
         model = self.model_factory()
         self.trainer_kwargs["model"] = model
@@ -190,6 +229,10 @@ class OptimizationManager:
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("lr_factor", lr_factor)
+            mlflow.log_param("eval_batch_size", eval_batch_size)
+            mlflow.log_param("eval_use_amp", int(eval_use_amp))
+            mlflow.log_param("train_use_amp", int(train_use_amp))
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
@@ -216,6 +259,8 @@ if args.crop_size <= 0:
 
 # Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if train_use_amp and device.type == "cuda" and not torch.cuda.is_bf16_supported():
+    raise ValueError("train_use_amp requires CUDA bfloat16 support on this device.")
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -224,6 +269,13 @@ mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
+mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
+mlflow.log_param("requested_eval_use_amp", int(eval_use_amp))
+mlflow.log_param("requested_train_use_amp", int(train_use_amp))
+mlflow.log_param("optuna_storage", args.optuna_storage)
+mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
+mlflow.log_param("resume", args.resume)
+mlflow.log_param("amp_dtype", "bfloat16")
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -250,7 +302,9 @@ manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
 if dataset_config.holdout_plate is not None:
     # Keep one plate fully held out to prevent leakage across similar acquisition batches.
     manifest_nuclei = [
-        nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
+        nuclei
+        for nuclei in manifest_nuclei
+        if nuclei.get("plate") != dataset_config.holdout_plate
     ]
 manifest_nuclei_after_holdout_filter = len(manifest_nuclei)
 
@@ -320,8 +374,11 @@ callbacks_args = {
     "image_postprocessor": image_postprocessor,
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
+    "eval_use_amp": eval_use_amp,
 }
 
+# The trainer optimizes with one loader pair while callbacks can use separate,
+# non-shuffled loaders for more stable epoch-end metric aggregation.
 optimization_manager = OptimizationManager(
     trainer=UNetTrainer,
     hash_splitter=hash_splitter,
@@ -332,11 +389,18 @@ optimization_manager = OptimizationManager(
         out_channels=1,
         decoder_up_block="convt",
     ),
+    device=device,
     epochs=args.epochs,
+    use_amp=train_use_amp,
     max_train_batches=max_train_batches,
 )
 
-study = optuna.create_study(study_name="model_training", direction="minimize")
+study = optuna.create_study(
+    study_name=args.study_name,
+    direction="minimize",
+    storage=args.optuna_storage,
+    load_if_exists=args.resume == 1,
+)
 study.optimize(optimization_manager, n_trials=args.n_trials)
 
 joblib.dump(study, "optuna_study.joblib")

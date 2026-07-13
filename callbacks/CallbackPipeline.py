@@ -37,7 +37,11 @@ class CallbackComposer:
 
 
 class CallbackPipeline:
-    """Compose lifecycle callbacks behind a single trainer-facing object."""
+    """Compose training callbacks behind a single trainer-facing object.
+
+    The pipeline coordinates progress logging, batch loss logging, epoch-end
+    evaluation, image export, metric logging, and early stopping.
+    """
 
     def __init__(
         self,
@@ -49,6 +53,7 @@ class CallbackPipeline:
         batch_log_every_n: int = 50,
         batch_metric_log_every_n: int = 1,
         max_eval_batches: int | None = None,
+        eval_use_amp: bool = False,
     ) -> None:
         """Initialize composed callbacks used during training.
 
@@ -61,6 +66,8 @@ class CallbackPipeline:
             batch_log_every_n: Batch interval for progress logging.
             batch_metric_log_every_n: Batch interval for MLflow batch loss metrics.
             max_eval_batches: Optional cap on batches during callback evaluation.
+            eval_use_amp: Whether to use AMP for evaluation-only inference paths
+                such as epoch-end metrics and signature inference.
         """
         self.progress = ProgressLoggerCallback(batch_log_every_n=batch_log_every_n)
         self.batch_logger = BatchLossMlflowLoggerCallback(
@@ -71,12 +78,14 @@ class CallbackPipeline:
             loss=loss,
             image_postprocessor=image_postprocessor,
             max_eval_batches=max_eval_batches,
+            use_amp=eval_use_amp,
         )
         self.metrics_logger = MetricsMlflowLoggerCallback(metrics=metrics, loss=loss)
         self.image_saver = ImageSaverCallback(image_savers=image_savers)
         self.early_stopping = EarlyStoppingAndCheckpointCallback(
             early_stopping_counter_threshold=early_stopping_counter_threshold,
             image_postprocessor=image_postprocessor,
+            use_amp=eval_use_amp,
         )
 
         self.composer = CallbackComposer(

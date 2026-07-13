@@ -8,7 +8,7 @@ the forward pass of the model.
 
 Classes:
     BaseModel: Abstract base class for all models.
-    BaseGeneratorModel: Abstract base class for virtual staining generator 
+    BaseGeneratorModel: Abstract base class for virtual staining generator
         models, extending BaseModel but defines more specific properties and
         methods.
 """
@@ -41,10 +41,10 @@ class BaseModel(ABC, torch.nn.Module):
         :param x: Input tensor.
         :return: Output tensor after passing through the model.
         """
-        raise NotImplementedError("Subclasses must implement this method.")   
+        raise NotImplementedError("Subclasses must implement this method.")
 
     def save_weights(
-        self, 
+        self,
         filename: str,
         dir: Union[pathlib.Path, str]
     ) -> pathlib.Path:
@@ -55,8 +55,8 @@ class BaseModel(ABC, torch.nn.Module):
             pass
         else:
             raise TypeError(f"Expected dir to be str or pathlib.Path, "
-                            f"got {type(dir)}")        
-        
+                            f"got {type(dir)}")
+
         if not dir.is_dir():
             raise NotADirectoryError(
                 f"Expected dir {dir} to be a directory, "
@@ -67,7 +67,7 @@ class BaseModel(ABC, torch.nn.Module):
                 f"Path {dir} does not exist. "
                 "Please provide a valid directory."
             )
-        
+
         dir = dir.resolve(strict=True)
 
         weight_file = dir / filename
@@ -83,31 +83,36 @@ class BaseModel(ABC, torch.nn.Module):
     def to_config(self) -> Dict[str, Any]:
         """
         Converts the model configuration to a dictionary format.
-        
+
         :return: Dictionary containing model configuration.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
     @classmethod
     @abstractmethod
     def from_config(cls, config: Dict) -> 'BaseModel':
         """
         Creates a model instance from a configuration dictionary.
-        
+
         :param config: Dictionary containing model configuration.
         :return: An instance of the model.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
 class BaseGeneratorModel(BaseModel):
+    """Base class for generator-style image-to-image models.
+
+    By default the model returns raw output activations so callers can decide
+    whether postprocessing should happen inside the loss/metric pipeline.
+    """
 
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        out_activation: ActivationType = 'sigmoid',
+        out_activation: ActivationType = 'none',
     ):
-        
+
         super().__init__()
 
         self._in_channels = in_channels
@@ -130,12 +135,12 @@ class BaseGeneratorModel(BaseModel):
         :return: Output tensor after passing through the model.
         """
         if self.in_conv is not None:
-            x = self.in_conv(x)        
-        x = self.encoder(x)        
-        x = self.decoder(x)        
+            x = self.in_conv(x)
+        x = self.encoder(x)
+        x = self.decoder(x)
         if self.out_conv is not None:
             x = self.out_conv(x)
-        
+
         return self.out_activation(x)
 
     @property

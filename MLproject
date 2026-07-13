@@ -8,8 +8,17 @@ entry_points:
       n_trials: {type: int, default: 4}
       max_train_batches: {type: int, default: -1}
       max_eval_batches: {type: int, default: -1}
+      eval_batch_size: {type: int, default: -1}
+      eval_use_amp: {type: int, default: 0}
+      train_use_amp: {type: int, default: 1}
       enable_image_savers: {type: int, default: 1}
+      batch_metric_log_every_n: {type: int, default: 1}
       crop_size: {type: int, default: 256}
+      study_name: {type: str, default: ""}
+      optuna_storage: {type: str, default: "sqlite:///optuna_study.db"}
+      checkpoint_root: {type: str, default: "trial_checkpoints"}
+      resume: {type: int, default: 1}
+      parent_run_id: {type: str, default: ""}
     command: >
       uv run train.py
       --dataset {dataset}
@@ -17,5 +26,14 @@ entry_points:
       --n-trials {n_trials}
       --max-train-batches {max_train_batches}
       --max-eval-batches {max_eval_batches}
+      --eval-batch-size {eval_batch_size}
+      --eval-use-amp {eval_use_amp}
+      --train-use-amp {train_use_amp}
       --enable-image-savers {enable_image_savers}
+      --batch-metric-log-every-n {batch_metric_log_every_n}
       --crop-size {crop_size}
+      --study-name {study_name}
+      --optuna-storage {optuna_storage}
+      --checkpoint-root {checkpoint_root}
+      --resume {resume}
+      --parent-run-id {parent_run_id}
