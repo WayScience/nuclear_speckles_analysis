@@ -5,6 +5,7 @@ launches Optuna trials, and logs run metadata and artifacts with MLflow.
 """
 
 import argparse
+import math
 import pathlib
 import random
 from dataclasses import dataclass
@@ -134,6 +135,7 @@ max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
 requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
 eval_use_amp = args.eval_use_amp == 1
 train_use_amp = args.train_use_amp == 1
+max_batch_size = 8
 
 
 class OptimizationManager:
@@ -176,9 +178,16 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
-        # Let Optuna choose a mini-batch size and learning rate for this trial.
-        batch_size = trial.suggest_int("batch_size", 1, 8)
-        lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        # Couple learning rate to batch size so Optuna searches a scaling factor
+        # while the derived rate stays within the previous learning-rate bounds.
+        batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
+        lr_factor = trial.suggest_float(
+            "lr_factor",
+            1e-5,
+            1e-3 / math.sqrt(max_batch_size),
+            log=True,
+        )
+        lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
         # Optimization can tune the training batch size without forcing the same
@@ -220,6 +229,7 @@ class OptimizationManager:
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("lr_factor", lr_factor)
             mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("eval_use_amp", int(eval_use_amp))
             mlflow.log_param("train_use_amp", int(train_use_amp))
