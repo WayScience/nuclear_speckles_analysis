@@ -57,6 +57,8 @@ class DatasetConfig:
     target_channel: str
     metadata_column_map: dict[str, str] | None = None
     holdout_plate: str | None = None
+    input_resolution: float | None = None
+    target_resolution: float | None = None
 
 
 # Shared root for dataset-specific image directories, profiles, and caches.
@@ -79,6 +81,8 @@ DATASET_CONFIGS = {
             "Metadata_Position": "Metadata_Site",
         },
         holdout_plate="Rep3",
+        input_resolution=0.13700,
+        target_resolution=6.5,
     ),
     "initial": DatasetConfig(
         image_dir=initial_dataset_path / "IC_corrected_images",
@@ -96,6 +100,8 @@ DATASET_CONFIGS = {
             "Nuclei_AreaShape_BoundingBoxMaximum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
         },
         holdout_plate="slide2",
+        input_resolution=None,
+        target_resolution=None,
     ),
 }
 
@@ -276,6 +282,8 @@ mlflow.log_param("optuna_storage", args.optuna_storage)
 mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
 mlflow.log_param("resume", args.resume)
 mlflow.log_param("amp_dtype", "bfloat16")
+mlflow.log_param("input_resolution", dataset_config.input_resolution)
+mlflow.log_param("target_resolution", dataset_config.target_resolution)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
@@ -296,6 +304,8 @@ cache_result = ensure_dapi_to_gold_cache(
     target_channel=dataset_config.target_channel,
     crop_size=args.crop_size,
     metadata_column_map=dataset_config.metadata_column_map,
+    input_resolution=dataset_config.input_resolution,
+    target_resolution=dataset_config.target_resolution,
 )
 manifest_nuclei = load_cache_manifest(manifest_path=cache_result.manifest_path)
 manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
