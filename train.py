@@ -48,6 +48,13 @@ class DatasetConfig:
         target_channel: Target channel name used for supervision crop selection.
         metadata_column_map: Optional source-to-canonical metadata renaming map
             applied before crop cache generation.
+        holdout_plate: Optional plate identifier removed before train/val splits.
+        input_resolution: Optional source microscope resolution in microns per
+            pixel. Whole-image resampling is enabled only when this and
+            ``target_resolution`` are both provided.
+        target_resolution: Optional target microscope resolution in microns per
+            pixel. Whole-image resampling is enabled only when this and
+            ``input_resolution`` are both provided.
     """
 
     image_dir: pathlib.Path
@@ -69,6 +76,7 @@ u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
 initial_dataset_path = speckle_dataset_path / "initial_dataset"
 
 DATASET_CONFIGS = {
+    # Only U2OS currently uses microscope-resolution harmonization before crop caching.
     "u2os": DatasetConfig(
         image_dir=u2os_dataset_path / "u20s_images/tiffs",
         parquet_path=u2os_dataset_path

@@ -25,7 +25,22 @@ class CropCacheResult:
 
 @dataclass(frozen=True)
 class ResamplingGeometry:
-    """Geometry needed to map full-image pixels and bbox coordinates together."""
+    """Geometry shared by full-image resampling and bbox coordinate remapping.
+
+    Attributes:
+        scale_factor: Isotropic resize factor computed as
+            ``input_resolution / target_resolution``.
+        resized_height: Height of the full image immediately after resizing.
+        resized_width: Width of the full image immediately after resizing.
+        output_height: Final centered crop/pad output height.
+        output_width: Final centered crop/pad output width.
+        crop_top: Top offset removed from the resized image during centered crop.
+        crop_left: Left offset removed from the resized image during centered crop.
+        pad_top: Zero-padding added above the centered crop result.
+        pad_bottom: Zero-padding added below the centered crop result.
+        pad_left: Zero-padding added left of the centered crop result.
+        pad_right: Zero-padding added right of the centered crop result.
+    """
 
     scale_factor: float
     resized_height: int
@@ -159,7 +174,26 @@ def _build_resampling_geometry(
     input_resolution: float,
     target_resolution: float,
 ) -> ResamplingGeometry:
-    """Compute centered crop/pad geometry for whole-image resampling."""
+    """Compute centered crop/pad geometry for whole-image resampling.
+
+    The full source image is resized isotropically using
+    ``input_resolution / target_resolution``. The resized image is then mapped
+    onto the template field of view using a centered crop when the resized image
+    is larger than the template, or centered zero-padding when it is smaller.
+
+    Args:
+        input_shape: Source full-image shape as ``(height, width)``.
+        template_shape: Target full-image shape as ``(height, width)``.
+        input_resolution: Source microscope resolution in microns per pixel.
+        target_resolution: Target microscope resolution in microns per pixel.
+
+    Returns:
+        Geometry object containing resize dimensions and centered crop/pad
+        offsets used for both image warping and bbox coordinate transforms.
+
+    Raises:
+        ValueError: If either resolution is non-positive.
+    """
 
     if input_resolution <= 0 or target_resolution <= 0:
         raise ValueError(
@@ -203,7 +237,16 @@ def _build_resampling_geometry(
 
 
 def _cast_resampled_image(image: np.ndarray, dtype: np.dtype) -> np.ndarray:
-    """Cast interpolated image values back to the source dtype."""
+    """Cast interpolated image values back to the source dtype.
+
+    Args:
+        image: Interpolated image array.
+        dtype: Original source dtype.
+
+    Returns:
+        Image array cast back to the source dtype. Integer dtypes are rounded
+        and clipped to the valid dtype range before casting.
+    """
 
     if np.issubdtype(dtype, np.integer):
         dtype_info = np.iinfo(dtype)
@@ -216,7 +259,22 @@ def _register_and_resample_full_image(
     image: np.ndarray,
     geometry: ResamplingGeometry,
 ) -> np.ndarray:
-    """Resample a full image, then center-crop or pad it to template size."""
+    """Resample a full image, then center-crop or pad it to template size.
+
+    Cubic interpolation is used for the isotropic resize so cached training
+    crops are generated from the same full-image geometry used for bbox
+    remapping. Interpolated values are cast back to the source dtype before the
+    centered crop/pad step so downstream cache metadata inference remains
+    compatible with integer TIFF inputs.
+
+    Args:
+        image: Source full image as a 2D array.
+        geometry: Shared resize and centered crop/pad geometry.
+
+    Returns:
+        Resampled 2D image with final shape
+        ``(geometry.output_height, geometry.output_width)``.
+    """
 
     resized = resize(
         image,
@@ -258,7 +316,25 @@ def _transform_bbox_coordinates(
     y1: int,
     geometry: ResamplingGeometry,
 ) -> tuple[int, int, int, int]:
-    """Map a bbox from original full-image coordinates into resampled image space."""
+    """Map a bbox from original full-image coordinates into resampled image space.
+
+    Bounding-box minima use ``floor`` and maxima use ``ceil`` after scaling so
+    discretization does not shrink the box away from the original nucleus. The
+    same centered crop/pad offsets used for the resampled full image are then
+    applied to the bbox coordinates, followed by clamping to valid output
+    bounds.
+
+    Args:
+        x0: Original minimum x coordinate.
+        y0: Original minimum y coordinate.
+        x1: Original maximum x coordinate.
+        y1: Original maximum y coordinate.
+        geometry: Shared resize and centered crop/pad geometry.
+
+    Returns:
+        Transformed bbox coordinates as ``(x0, y0, x1, y1)`` in the final
+        resampled full-image coordinate system.
+    """
 
     scaled_x0 = int(np.floor(x0 * geometry.scale_factor))
     scaled_y0 = int(np.floor(y0 * geometry.scale_factor))
@@ -422,6 +498,10 @@ def _validate_manifest(
 
     Returns:
         Tuple of (is_valid, rows). Rows are returned only when valid.
+
+    The manifest is reusable only when its cached crop layout, on-disk file
+    paths, and stored resolution settings all match the current request. This
+    forces a rebuild when whole-image resampling settings change.
     """
 
     if not manifest_path.exists():
@@ -528,6 +608,14 @@ def ensure_dapi_to_gold_cache(
 ) -> CropCacheResult:
     """Build or reuse a DAPI-to-Gold crop cache for configured channels.
 
+    When both ``input_resolution`` and ``target_resolution`` are provided, full
+    DAPI and Gold field-of-view images are resampled before any nucleus crop is
+    extracted. The resampled full images are matched to the target field of
+    view using a centered crop or centered zero-padding, and the original
+    CellProfiler bounding boxes are transformed through that same geometry
+    before crop extraction. When both resolutions are ``None``, cache building
+    follows the original direct-from-raw-image crop path.
+
     Args:
         image_dir: Directory containing source TIFF images.
         parquet_path: Path to single-cell profile parquet.
@@ -539,13 +627,18 @@ def ensure_dapi_to_gold_cache(
         crop_size: Fixed square crop size in pixels for cached nucleus crops.
         metadata_column_map: Optional source-to-canonical metadata renaming map.
         input_resolution: Source microscope resolution in microns per pixel.
+            Whole-image resampling is enabled only when this and
+            ``target_resolution`` are both provided.
         target_resolution: Target microscope resolution in microns per pixel.
+            Whole-image resampling is enabled only when this and
+            ``input_resolution`` are both provided.
 
     Returns:
         Manifest path plus inferred image specs for training configuration.
 
     Raises:
-        ValueError: If no valid crop pairs can be produced.
+        ValueError: If crop sizing is invalid, resolution settings are only
+            partially configured, or no valid crop pairs can be produced.
     """
 
     cache_dir.mkdir(parents=True, exist_ok=True)
