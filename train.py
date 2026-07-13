@@ -89,8 +89,8 @@ DATASET_CONFIGS = {
             "Metadata_Position": "Metadata_Site",
         },
         holdout_plate="Rep3",
-        input_resolution=0.13700,
-        target_resolution=0.274,
+        input_resolution=2.74,
+        target_resolution=6.45,
     ),
     "initial": DatasetConfig(
         image_dir=initial_dataset_path / "IC_corrected_images",
