@@ -90,7 +90,7 @@ DATASET_CONFIGS = {
         },
         holdout_plate="Rep3",
         input_resolution=0.13700,
-        target_resolution=6.5,
+        target_resolution=0.274,
     ),
     "initial": DatasetConfig(
         image_dir=initial_dataset_path / "IC_corrected_images",
