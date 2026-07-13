@@ -361,6 +361,22 @@ def _transform_bbox_coordinates(
     return transformed_x0, transformed_y0, transformed_x1, transformed_y1
 
 
+def _transform_point_coordinates(
+    x: float,
+    y: float,
+    geometry: ResamplingGeometry,
+) -> tuple[float, float]:
+    """Map a point from original full-image coordinates into resampled image space."""
+
+    transformed_x = (float(x) * geometry.scale_factor) - geometry.crop_left + geometry.pad_left
+    transformed_y = (float(y) * geometry.scale_factor) - geometry.crop_top + geometry.pad_top
+
+    transformed_x = min(max(transformed_x, 0.0), float(geometry.output_width))
+    transformed_y = min(max(transformed_y, 0.0), float(geometry.output_height))
+
+    return transformed_x, transformed_y
+
+
 def _build_filtered_profiles(
     parquet_path: pathlib.Path,
     metadata_column_map: dict[str, str] | None = None,
@@ -430,6 +446,22 @@ def _build_filtered_profiles(
         "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
         "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
     }
+    optional_center_candidates = {
+        "Metadata_Nuclei_Center_X": [
+            "Metadata_Nuclei_Center_X",
+            "Metadata_Nuclei_AreaShape_Center_X",
+            "Metadata_Nuclei_Location_Center_X",
+            "Nuclei_AreaShape_Center_X",
+            "Nuclei_Location_Center_X",
+        ],
+        "Metadata_Nuclei_Center_Y": [
+            "Metadata_Nuclei_Center_Y",
+            "Metadata_Nuclei_AreaShape_Center_Y",
+            "Metadata_Nuclei_Location_Center_Y",
+            "Nuclei_AreaShape_Center_Y",
+            "Nuclei_Location_Center_Y",
+        ],
+    }
     required_cols = required_metadata_cols | required_bbox_cols
 
     missing_metadata_cols = sorted(required_metadata_cols - common_columns)
@@ -456,6 +488,31 @@ def _build_filtered_profiles(
         if still_missing_bbox_cols:
             raise ValueError(f"Missing required profile columns: {still_missing_bbox_cols}")
 
+    resolved_optional_centers: dict[str, str] = {}
+    source_columns = list(scdf.columns)
+    common_columns = set(scdf.columns)
+    for canonical_col, candidates in optional_center_candidates.items():
+        if canonical_col in common_columns:
+            continue
+
+        matching_candidates = [candidate for candidate in candidates if candidate in common_columns]
+        if matching_candidates:
+            resolved_optional_centers[matching_candidates[0]] = canonical_col
+            continue
+
+        try:
+            source_column = _resolve_column_by_substring(
+                columns=source_columns,
+                required_name=canonical_col.removeprefix("Metadata_"),
+            )
+        except ValueError:
+            continue
+        resolved_optional_centers[source_column] = canonical_col
+
+    if resolved_optional_centers:
+        scdf = scdf.rename(columns=resolved_optional_centers)
+        common_columns = set(scdf.columns)
+
     keep_cols = [c for c in scdf.columns if c in common_columns and (c.startswith("Metadata_") or c in required_cols)]
     scdf = scdf[keep_cols].copy()
 
@@ -467,6 +524,14 @@ def _build_filtered_profiles(
     ]
     for col in bbox_cols:
         scdf[col] = scdf[col].astype(int)
+
+    center_cols = [
+        "Metadata_Nuclei_Center_X",
+        "Metadata_Nuclei_Center_Y",
+    ]
+    for col in center_cols:
+        if col in scdf.columns:
+            scdf[col] = scdf[col].astype(float)
 
     scdf["Nuclei_AreaShape_BoundingBoxDelta_X"] = (
         scdf["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X"]
@@ -777,6 +842,25 @@ def ensure_dapi_to_gold_cache(
             center_x = (x0 + x1) / 2
             center_y = (y0 + y1) / 2
 
+            cellprofiler_center_x = ""
+            cellprofiler_center_y = ""
+            if (
+                "Metadata_Nuclei_Center_X" in nucleus.index
+                and "Metadata_Nuclei_Center_Y" in nucleus.index
+                and pd.notna(nucleus["Metadata_Nuclei_Center_X"])
+                and pd.notna(nucleus["Metadata_Nuclei_Center_Y"])
+            ):
+                cp_center_x = float(nucleus["Metadata_Nuclei_Center_X"])
+                cp_center_y = float(nucleus["Metadata_Nuclei_Center_Y"])
+                if geometry is not None:
+                    cp_center_x, cp_center_y = _transform_point_coordinates(
+                        x=cp_center_x,
+                        y=cp_center_y,
+                        geometry=geometry,
+                    )
+                cellprofiler_center_x = f"{cp_center_x:.6f}"
+                cellprofiler_center_y = f"{cp_center_y:.6f}"
+
             sample_id = (
                 f"plate={plate_name}|well={well_name}|site={site_name}|center_x={center_x:.6f}|center_y={center_y:.6f}"
             )
@@ -806,6 +890,8 @@ def ensure_dapi_to_gold_cache(
                     "target_path": str(target_path.resolve()),
                     "input_resolution": "" if input_resolution is None else f"{input_resolution:.6f}",
                     "target_resolution": "" if target_resolution is None else f"{target_resolution:.6f}",
+                    "cellprofiler_center_x": cellprofiler_center_x,
+                    "cellprofiler_center_y": cellprofiler_center_y,
                 }
             )
 
@@ -827,6 +913,8 @@ def ensure_dapi_to_gold_cache(
                 "target_path",
                 "input_resolution",
                 "target_resolution",
+                "cellprofiler_center_x",
+                "cellprofiler_center_y",
             ],
         )
         writer.writeheader()
