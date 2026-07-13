@@ -8,6 +8,9 @@ from torch.utils.data import DataLoader
 class UNetTrainer:
     """
     Orchestrates training and evaluation of image-to-image translation models.
+
+    Optimization batches and epoch-end evaluation can use different dataloaders
+    so training throughput and metric aggregation can be tuned independently.
     """
 
     def __init__(
@@ -26,7 +29,7 @@ class UNetTrainer:
         eval_val_dataloader: Union[torch.utils.data.Dataset, DataLoader, None] = None,
         max_train_batches: int | None = None,
     ) -> None:
-        """Initialize trainer state and optional AMP scaler.
+        """Initialize trainer state and optional AMP-enabled forward passes.
 
         Args:
             model: Trainable image-to-image model.
@@ -40,7 +43,8 @@ class UNetTrainer:
             image_postprocessor: Postprocessor applied to model outputs.
             epochs: Maximum number of training epochs.
             device: Target device for model and tensors.
-            use_amp: Whether to use automatic mixed precision.
+            use_amp: Whether to use automatic mixed precision autocast during
+                training forward and loss computation.
             eval_train_dataloader: Optional dataloader used for epoch-end train metrics.
             eval_val_dataloader: Optional dataloader used for epoch-end validation metrics.
             max_train_batches: Optional cap on train batches per epoch.
@@ -59,6 +63,8 @@ class UNetTrainer:
         )
         self.use_amp = use_amp  # Automatic Mixed Precision (AMP)
         self.amp_dtype = torch.bfloat16
+        # Evaluation loaders can be non-shuffled or use a different batch size
+        # without affecting the optimization dataloaders.
         self.eval_train_dataloader = (
             train_dataloader if eval_train_dataloader is None else eval_train_dataloader
         )
@@ -145,6 +151,8 @@ class UNetTrainer:
                 train_data["batch_loss_components"] = detached_loss_components
                 train_data["batch_loss_name"] = self.loss_name
 
+                # This training path uses autocast for forward/loss computation
+                # but performs a standard backward/update step.
                 self.model_optimizer.zero_grad()
                 loss.backward()
                 self.model_optimizer.step()

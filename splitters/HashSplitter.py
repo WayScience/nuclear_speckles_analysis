@@ -8,9 +8,7 @@ from datasets.dataset_00.utils.Collator import collator
 
 
 class HashSplitter:
-    """
-    Create datasplits by hashing sample metadata IDs
-    """
+    """Create deterministic dataset splits from hashed sample metadata IDs."""
 
     def __init__(
         self,
@@ -59,6 +57,8 @@ class HashSplitter:
         Args:
             batch_size: Batch size for all returned dataloaders.
             train_shuffle: Whether the training split loader should shuffle.
+                Set this to ``False`` when reusing the train split for
+                deterministic epoch-end evaluation.
 
         Returns:
             Tuple of ``(train_loader, val_loader, test_loader)``.
@@ -77,6 +77,8 @@ class HashSplitter:
                 collate_fn=collator,
             )
 
+        # Once subset loaders are built, downstream dataset access should return
+        # individual samples rather than pre-split collections.
         self.dataset.split_data = False
         return (
             make_loader(self.splits["train"], shuffle=train_shuffle),

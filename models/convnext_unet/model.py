@@ -100,6 +100,11 @@ class BaseModel(ABC, torch.nn.Module):
         raise NotImplementedError("Subclasses must implement this method.")
 
 class BaseGeneratorModel(BaseModel):
+    """Base class for generator-style image-to-image models.
+
+    By default the model returns raw output activations so callers can decide
+    whether postprocessing should happen inside the loss/metric pipeline.
+    """
 
     def __init__(
         self,

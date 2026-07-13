@@ -1,3 +1,9 @@
+"""Train and optimize DAPI-to-Gold image-to-image models.
+
+This script prepares cached crop datasets, builds deterministic data splits,
+launches Optuna trials, and logs run metadata and artifacts with MLflow.
+"""
+
 import argparse
 import pathlib
 import random
@@ -52,6 +58,7 @@ class DatasetConfig:
     holdout_plate: str | None = None
 
 
+# Shared root for dataset-specific image directories, profiles, and caches.
 speckle_dataset_path = pathlib.Path("/mnt/big_drive/nuclear_speckle_data").resolve(
     strict=True
 )
@@ -97,6 +104,8 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+# Evaluation can use a different batch size than optimization to make
+# epoch-end metric passes easier to fit on available hardware.
 parser.add_argument("--eval-batch-size", type=int, default=-1)
 parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
 parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
@@ -104,6 +113,8 @@ parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 parser.add_argument("--crop-size", type=int, default=256)
+# Study metadata is passed through to Optuna storage so repeated runs can target
+# a stable study name and backing database.
 parser.add_argument("--study-name", type=str, default=None)
 parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
 parser.add_argument(
@@ -170,7 +181,8 @@ class OptimizationManager:
         lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
-        # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
+        # Optimization can tune the training batch size without forcing the same
+        # setting on epoch-end evaluation passes.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
         eval_train_dataloader, eval_val_dataloader, _ = self.hash_splitter.build_loaders(
             batch_size=eval_batch_size,
@@ -355,6 +367,8 @@ callbacks_args = {
     "eval_use_amp": eval_use_amp,
 }
 
+# The trainer optimizes with one loader pair while callbacks can use separate,
+# non-shuffled loaders for more stable epoch-end metric aggregation.
 optimization_manager = OptimizationManager(
     trainer=UNetTrainer,
     hash_splitter=hash_splitter,

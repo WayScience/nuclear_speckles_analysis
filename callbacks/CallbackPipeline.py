@@ -37,7 +37,11 @@ class CallbackComposer:
 
 
 class CallbackPipeline:
-    """Compose lifecycle callbacks behind a single trainer-facing object."""
+    """Compose training callbacks behind a single trainer-facing object.
+
+    The pipeline coordinates progress logging, batch loss logging, epoch-end
+    evaluation, image export, metric logging, and early stopping.
+    """
 
     def __init__(
         self,
@@ -62,7 +66,8 @@ class CallbackPipeline:
             batch_log_every_n: Batch interval for progress logging.
             batch_metric_log_every_n: Batch interval for MLflow batch loss metrics.
             max_eval_batches: Optional cap on batches during callback evaluation.
-            eval_use_amp: Whether to use AMP for evaluation-only inference paths.
+            eval_use_amp: Whether to use AMP for evaluation-only inference paths
+                such as epoch-end metrics and signature inference.
         """
         self.progress = ProgressLoggerCallback(batch_log_every_n=batch_log_every_n)
         self.batch_logger = BatchLossMlflowLoggerCallback(

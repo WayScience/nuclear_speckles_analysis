@@ -8,7 +8,12 @@ from callbacks.base import BaseCallback
 
 
 class EpochEvaluatorCallback(BaseCallback):
-    """Run epoch-end evaluation for configured data splits."""
+    """Run epoch-end evaluation for configured data splits.
+
+    Train and validation metrics can be computed with dedicated evaluation
+    dataloaders so the metric pass is deterministic and independent from the
+    optimization loaders.
+    """
 
     def __init__(
         self,
@@ -25,7 +30,7 @@ class EpochEvaluatorCallback(BaseCallback):
             loss: Loss metric object updated on each evaluation batch.
             image_postprocessor: Postprocessor applied when logits are not used.
             max_eval_batches: Optional cap on evaluation batches per split.
-            use_amp: Whether to run evaluation inference under AMP.
+            use_amp: Whether to run evaluation inference under AMP autocast.
         """
         self.metrics = metrics
         self.loss = loss

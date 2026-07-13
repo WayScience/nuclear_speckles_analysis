@@ -10,7 +10,11 @@ from callbacks.base import BaseCallback
 
 
 class EarlyStoppingAndCheckpointCallback(BaseCallback):
-    """Track best loss, save checkpoints, and control early stopping."""
+    """Track best loss, save checkpoints, and control early stopping.
+
+    The callback also infers an MLflow model signature from one validation
+    sample using the same evaluation inference mode configured for callbacks.
+    """
 
     def __init__(
         self,
@@ -23,7 +27,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         Args:
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
             image_postprocessor: Postprocessor used before signature inference.
-            use_amp: Whether to run signature inference under AMP.
+            use_amp: Whether to run signature inference under AMP autocast.
         """
         self.early_stopping_counter_threshold = early_stopping_counter_threshold
         self.image_postprocessor = image_postprocessor
@@ -44,7 +48,7 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         val_dataloader = hook_data.get("eval_val_dataloader", hook_data["val_dataloader"])
         loss_value = hook_data["loss_value"]
 
-        # Reuse one validation sample to keep model signature logging lightweight.
+        # Reuse one validation sample to keep signature inference lightweight.
         val_sample = next(iter(val_dataloader))
         signature = self._prepare_signature(input_example=val_sample["input"], model=model)
 

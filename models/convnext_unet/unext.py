@@ -62,7 +62,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
         :param out_channels: Number of output channels.
         :param decoder_up_block: Type of up-sampling block to use in the decoder.
             Can be 'pixelshuffle' for PixelShuffle2DUpBlock or 'convt' for
-            ConvTrans2DUpBlock. Default is 'pixelshuffle'.
+            ConvTrans2DUpBlock. Default is 'convt'.
         :param decoder_compute_block: Type of computation block to use in the
             decoder. Can be 'convnext' for Conv2DConvNeXtBlock or 'conv2d' for
             Conv2DNormActBlock. Default is 'convnext'.
