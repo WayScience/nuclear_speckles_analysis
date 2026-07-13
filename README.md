@@ -31,7 +31,7 @@ Within each cache root, training uses:
 
 ### Normalization
 
-Before samples are passed through the model, both input and target crops are normalized by their channel max intensity (dtype max, for example `255` for `uint8` and `65535` for `uint16`) in `datasets/dataset_00/utils/ImagePreProcessor.py`.
+Before samples are passed through the model, both input and target crops are normalized by their channel max intensity (dtype max, for example `255` for `uint8` and `65535` for `uint16`) in `datasets/dataset_00/utils/ImagePreProcessor.py`, so targets live in `[0, 1]`. The model itself returns raw logits by default (`out_activation='none'`), and sigmoid is applied later in the training/evaluation postprocessing path when non-logit predictions are needed.
 
 ## Data Splitting Strategy
 
