@@ -32,20 +32,26 @@ class ImagePreProcessor:
 
     def set_image_specs(
         self,
-        input_max_pixel_value: float,
-        target_max_pixel_value: float,
+        input_mean: float | None = None,
+        input_std: float | None = None,
+        target_mean: float | None = None,
+        target_std: float | None = None,
         **kwargs,
     ) -> None:
-        """Store normalization constants inferred from cached images.
+        """Store z-score normalization statistics inferred from training data.
 
         Args:
-            input_max_pixel_value: Max pixel value used to normalize inputs.
-            target_max_pixel_value: Max pixel value used to normalize targets.
+            input_mean: Mean pixel intensity used to center inputs.
+            input_std: Standard deviation used to scale inputs.
+            target_mean: Mean pixel intensity used to center targets.
+            target_std: Standard deviation used to scale targets.
             **kwargs: Additional image spec keys ignored by this preprocessor.
         """
 
-        self.input_max_pixel_value = float(input_max_pixel_value)
-        self.target_max_pixel_value = float(target_max_pixel_value)
+        self.input_mean = None if input_mean is None else float(input_mean)
+        self.input_std = None if input_std is None else float(input_std)
+        self.target_mean = None if target_mean is None else float(target_mean)
+        self.target_std = None if target_std is None else float(target_std)
 
     def format_img(self, img: np.ndarray) -> torch.Tensor:
         """Convert a normalized 2D numpy image into a channel-first tensor.
@@ -79,7 +85,8 @@ class ImagePreProcessor:
             Dictionary containing formatted ``input_image`` and ``target_image`` tensors.
 
         Raises:
-            ValueError: If normalization constants are non-positive.
+            ValueError: If z-score statistics are missing or standard deviations
+                are non-positive.
         """
 
         if self.input_transform is not None:
@@ -88,11 +95,13 @@ class ImagePreProcessor:
         if self.target_transform is not None:
             target_img = self.target_transform(image=target_img)["image"]
 
-        if self.input_max_pixel_value <= 0 or self.target_max_pixel_value <= 0:
-            raise ValueError("Pixel value normalization constants must be positive")
+        if None in (self.input_mean, self.input_std, self.target_mean, self.target_std):
+            raise ValueError("Z-score normalization statistics must be set before loading data")
+        if self.input_std <= 0 or self.target_std <= 0:
+            raise ValueError("Z-score standard deviations must be positive")
 
-        input_img = input_img / self.input_max_pixel_value
-        target_img = target_img / self.target_max_pixel_value
+        input_img = (input_img - self.input_mean) / self.input_std
+        target_img = (target_img - self.target_mean) / self.target_std
 
         return {
             "input_image": self.format_img(input_img),
