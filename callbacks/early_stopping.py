@@ -26,7 +26,8 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
 
         Args:
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
-            image_postprocessor: Postprocessor used before signature inference.
+            image_postprocessor: Prediction postprocessor shared with training
+                and used before MLflow signature inference.
             use_amp: Whether to run signature inference under AMP autocast.
         """
         self.early_stopping_counter_threshold = early_stopping_counter_threshold

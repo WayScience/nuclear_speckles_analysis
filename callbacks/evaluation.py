@@ -28,7 +28,8 @@ class EpochEvaluatorCallback(BaseCallback):
         Args:
             metrics: Metrics updated on each evaluation batch.
             loss: Loss metric object updated on each evaluation batch.
-            image_postprocessor: Postprocessor applied when logits are not used.
+            image_postprocessor: Prediction postprocessor and inverse-transform
+                helper used to denormalize tensors for logging.
             max_eval_batches: Optional cap on evaluation batches per split.
             use_amp: Whether to run evaluation inference under AMP autocast.
         """
@@ -38,7 +39,6 @@ class EpochEvaluatorCallback(BaseCallback):
         self.max_eval_batches = max_eval_batches
         self.use_amp = use_amp
         self.amp_dtype = torch.bfloat16
-        self.compute_sigmoid = any(not metric.use_logits for metric in [*metrics, loss])
 
     def on_epoch_end(self, hook_data: dict[str, Any]) -> None:
         """Run evaluation on train and validation splits.
@@ -90,21 +90,24 @@ class EpochEvaluatorCallback(BaseCallback):
                     dtype=self.amp_dtype,
                 ):
                     generated_predictions = model(samples["input"])
-                    sigmoid_generated_predictions = generated_predictions.clone()
+                    postprocessed_predictions = self.image_postprocessor(
+                        generated_predictions
+                    )
 
-                    # Only postprocess if any metric/loss expects non-logit values.
-                    if self.compute_sigmoid:
-                        sigmoid_generated_predictions = self.image_postprocessor(
-                            generated_predictions
-                        )
+                denormalized_predictions = self.image_postprocessor.denormalize_target(
+                    postprocessed_predictions
+                )
+                denormalized_targets = self.image_postprocessor.denormalize_target(
+                    samples["target"]
+                )
 
                 self.loss.update(
                     generated_predictions=(
                         generated_predictions
                         if self.loss.use_logits
-                        else sigmoid_generated_predictions
+                        else denormalized_predictions
                     ),
-                    targets=samples["target"],
+                    targets=(samples["target"] if self.loss.use_logits else denormalized_targets),
                     loss_mask=samples.get("loss_mask"),
                 )
 
@@ -113,9 +116,9 @@ class EpochEvaluatorCallback(BaseCallback):
                         generated_predictions=(
                             generated_predictions
                             if metric.use_logits
-                            else sigmoid_generated_predictions
+                            else denormalized_predictions
                         ),
-                        targets=samples["target"],
+                        targets=(samples["target"] if metric.use_logits else denormalized_targets),
                         loss_mask=samples.get("loss_mask"),
                     )
 

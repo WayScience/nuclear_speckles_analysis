@@ -287,8 +287,8 @@ class OptimizationManager:
         loss_callbacks = L1(device=device)
         metrics = [
             L2(device=device),
-            PSNR(device=device, max_pixel_value=1.0),
-            SSIM(device=device, max_pixel_value=1.0),
+            PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
+            SSIM(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
             PearsonCorrelation(device=device),
         ]
 
@@ -357,7 +357,8 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - Train-split z-score normalization for inputs and targets
-- L1 optimization objective with L2, PSNR, SSIM, and Pearson correlation metric logging
+- L1 optimization objective in z-score space with denormalized L2, PSNR, SSIM,
+  and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
