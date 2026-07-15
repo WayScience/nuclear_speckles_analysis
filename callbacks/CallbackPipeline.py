@@ -62,7 +62,8 @@ class CallbackPipeline:
             loss: Loss object used for callback-side logging and early stopping.
             early_stopping_counter_threshold: Number of non-improving epochs before stop.
             image_savers: Optional saver callable or list of saver callables.
-            image_postprocessor: Postprocessor applied when needed before logging.
+            image_postprocessor: Prediction postprocessor and inverse-transform
+                helper shared by evaluation, artifact export, and signature inference.
             batch_log_every_n: Batch interval for progress logging.
             batch_metric_log_every_n: Batch interval for MLflow batch loss metrics.
             max_eval_batches: Optional cap on batches during callback evaluation.

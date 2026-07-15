@@ -134,10 +134,10 @@ class CellCropToCropDataset(Dataset):
         if cache_dir is not None and cache_dir.exists():
             input_image = torch.from_numpy(
                 tifffile.imread(cache_dir / self.input_image_name)
-            ).to(device=self.device)
+            )
             target_image = torch.from_numpy(
                 tifffile.imread(cache_dir / self.target_image_name)
-            ).to(device=self.device)
+            )
         else:
             input_image, target_image = self.process_load_images()
             if cache_dir is not None:

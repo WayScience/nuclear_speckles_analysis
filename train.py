@@ -16,6 +16,7 @@ import mlflow
 import numpy as np
 import optuna
 import torch
+import tifffile
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
@@ -152,6 +153,63 @@ train_use_amp = args.train_use_amp == 1
 max_batch_size = 8
 
 
+def compute_training_image_stats(
+    manifest_rows: list[dict[str, str]],
+    train_indices: list[int],
+) -> dict[str, float]:
+    """Compute train-split image mean and std for z-score normalization.
+
+    Args:
+        manifest_rows: Full manifest rows backing the crop dataset.
+        train_indices: Dataset indices assigned to the training split.
+
+    Returns:
+        Dictionary containing train-split input/target means and standard deviations.
+
+    Raises:
+        ValueError: If the training split is empty or any variance is non-positive.
+    """
+
+    if not train_indices:
+        raise ValueError("Training split is empty; cannot compute z-score statistics.")
+
+    input_sum = 0.0
+    input_sum_sq = 0.0
+    target_sum = 0.0
+    target_sum_sq = 0.0
+    input_count = 0
+    target_count = 0
+
+    for idx in train_indices:
+        sample = manifest_rows[idx]
+        input_image = tifffile.imread(sample["input_path"])
+        target_image = tifffile.imread(sample["target_path"])
+
+        input_sum += float(input_image.sum(dtype=np.float64))
+        input_sum_sq += float(np.square(input_image, dtype=np.float64).sum())
+        target_sum += float(target_image.sum(dtype=np.float64))
+        target_sum_sq += float(np.square(target_image, dtype=np.float64).sum())
+        input_count += int(input_image.size)
+        target_count += int(target_image.size)
+
+    input_mean = input_sum / input_count
+    target_mean = target_sum / target_count
+    input_var = (input_sum_sq / input_count) - (input_mean**2)
+    target_var = (target_sum_sq / target_count) - (target_mean**2)
+    input_std = math.sqrt(max(input_var, 0.0))
+    target_std = math.sqrt(max(target_var, 0.0))
+
+    if input_std <= 0 or target_std <= 0:
+        raise ValueError("Training-split z-score standard deviations must be positive.")
+
+    return {
+        "input_mean": input_mean,
+        "input_std": input_std,
+        "target_mean": target_mean,
+        "target_std": target_std,
+    }
+
+
 class OptimizationManager:
     """Optuna objective function with MLflow logging."""
 
@@ -229,8 +287,8 @@ class OptimizationManager:
         loss_callbacks = L1(device=device)
         metrics = [
             L2(device=device),
-            PSNR(device=device, max_pixel_value=1.0),
-            SSIM(device=device, max_pixel_value=1.0),
+            PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
+            SSIM(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
             PearsonCorrelation(device=device),
         ]
 
@@ -298,7 +356,9 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- L1 optimization objective with L2, PSNR, SSIM, and Pearson correlation metric logging
+- Train-split z-score normalization for inputs and targets
+- L1 optimization objective in z-score space with denormalized L2, PSNR, SSIM,
+  and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
@@ -344,8 +404,40 @@ image_specs = cache_result.image_specs
 mlflow.log_param("input_max_pixel_value", image_specs["input_max_pixel_value"])
 mlflow.log_param("target_max_pixel_value", image_specs["target_max_pixel_value"])
 
+bootstrap_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
+
+bootstrap_dataset = CellCropToCropDataset(
+    manifest_rows=manifest_nuclei,
+    image_specs=image_specs,
+    image_preprocessor=bootstrap_preprocessor,
+    image_cache_path=tensor_cache_path,
+)
+
+# HashSplitter uses metadata-derived IDs, so splits stay stable across reruns.
+bootstrap_hash_splitter = HashSplitter(
+    dataset=bootstrap_dataset,
+    train_frac=0.825,
+    val_frac=0.125,
+)
+bootstrap_hash_splitter.split_by_hash()
+training_stats = compute_training_image_stats(
+    manifest_rows=manifest_nuclei,
+    train_indices=bootstrap_hash_splitter.splits["train"],
+)
+image_specs = image_specs | training_stats
+
+mlflow.log_param("input_mean", image_specs["input_mean"])
+mlflow.log_param("input_std", image_specs["input_std"])
+mlflow.log_param("target_mean", image_specs["target_mean"])
+mlflow.log_param("target_std", image_specs["target_std"])
+
 image_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
-image_postprocessor = ImagePostProcessor()
+image_postprocessor = ImagePostProcessor(
+    input_mean=image_specs["input_mean"],
+    input_std=image_specs["input_std"],
+    target_mean=image_specs["target_mean"],
+    target_std=image_specs["target_std"],
+)
 
 crop_image_dataset = CellCropToCropDataset(
     manifest_rows=manifest_nuclei,
@@ -354,7 +446,6 @@ crop_image_dataset = CellCropToCropDataset(
     image_cache_path=tensor_cache_path,
 )
 
-# HashSplitter uses metadata-derived IDs, so splits stay stable across reruns.
 hash_splitter = HashSplitter(
     dataset=crop_image_dataset,
     train_frac=0.825,
@@ -383,7 +474,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 5,
+    "early_stopping_counter_threshold": 15,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1

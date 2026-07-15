@@ -40,7 +40,8 @@ class UNetTrainer:
             train_dataloader: Training dataloader.
             val_dataloader: Validation dataloader used by callbacks.
             callbacks: Callback dispatcher used for hooks and logging.
-            image_postprocessor: Postprocessor applied to model outputs.
+            image_postprocessor: Postprocessor applied to model outputs before
+                the optimization loss consumes them.
             epochs: Maximum number of training epochs.
             device: Target device for model and tensors.
             use_amp: Whether to use automatic mixed precision autocast during
