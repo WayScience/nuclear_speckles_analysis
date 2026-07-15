@@ -27,8 +27,8 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1SSIMLoss import L1SSIMLoss
-from metrics.L1 import L1
 from metrics.L2 import L2
+from metrics.L1SSIMLossMetric import L1SSIMLossMetric
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
@@ -287,7 +287,7 @@ class OptimizationManager:
         }
 
         loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
-        loss_callbacks = L1(device=device)
+        loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
         metrics = [
             L2(device=device),
             PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),

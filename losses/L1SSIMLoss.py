@@ -2,7 +2,8 @@ from typing import Optional
 
 import torch
 from torch import nn
-from torchmetrics.functional.image import structural_similarity_index_measure
+
+from .l1_ssim import compute_l1_ssim_mean_components
 
 
 class L1SSIMLoss(nn.Module):
@@ -51,26 +52,9 @@ class L1SSIMLoss(nn.Module):
         Raises:
             ValueError: If prediction and target shapes differ.
         """
-
-        if generated_predictions.shape != targets.shape:
-            raise ValueError("The generated predictions and targets must be the same shape.")
-
-        l1 = torch.nn.functional.l1_loss(generated_predictions, targets, reduction="mean")
-        if self.data_range is None:
-            # Derive a positive SSIM range from the current batch so the loss can
-            # operate directly in z-score space without a fixed intensity bound.
-            batch_max = torch.maximum(generated_predictions.max(), targets.max())
-            batch_min = torch.minimum(generated_predictions.min(), targets.min())
-            ssim_data_range = (batch_max - batch_min).clamp_min(torch.finfo(torch.float32).eps)
-            ssim_data_range = ssim_data_range.to(generated_predictions.dtype)
-        else:
-            ssim_data_range = self.data_range
-
-        ssim = structural_similarity_index_measure(
-            preds=generated_predictions,
-            target=targets,
-            data_range=ssim_data_range,
+        return compute_l1_ssim_mean_components(
+            generated_predictions=generated_predictions,
+            targets=targets,
+            ssim_weight=self.ssim_weight,
+            data_range=self.data_range,
         )
-        ssim_loss = 1.0 - ssim
-        total = l1 + self.ssim_weight * ssim_loss
-        return {"l1": l1, "ssim": ssim_loss, "total": total}
