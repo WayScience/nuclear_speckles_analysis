@@ -22,7 +22,7 @@ def save_image_mlflow(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         save_path = pathlib.Path(tmp_dir) / image_filename
-        tifffile.imwrite(save_path, image.astype(np.uint8))
+        tifffile.imwrite(save_path, image)
 
         mlflow.log_artifact(local_path=save_path, artifact_path=save_image_path_folder)
 
@@ -42,4 +42,4 @@ def save_image_locally(
 
     save_image_path_folder = pathlib.Path(save_image_path_folder)
     save_image_path_folder.mkdir(parents=True, exist_ok=True)
-    tifffile.imwrite(save_image_path_folder / image_filename, image.astype(np.uint8))
+    tifffile.imwrite(save_image_path_folder / image_filename, image)
