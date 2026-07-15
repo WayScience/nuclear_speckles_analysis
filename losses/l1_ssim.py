@@ -62,12 +62,12 @@ def compute_l1_ssim_mean_components(
     Args:
         generated_predictions: Model predictions.
         targets: Ground-truth targets with matching shape.
-        ssim_weight: Multiplier applied to ``1 - ssim``.
+        ssim_weight: Multiplier applied to ``-1 * ssim``.
         data_range: Optional fixed intensity range for SSIM.
 
     Returns:
         Dictionary containing scalar ``l1``, ``ssim``, and ``total`` loss
-        components, where ``ssim`` stores ``1 - SSIM``.
+        components, where ``ssim`` stores ``-1 * SSIM``.
 
     Raises:
         ValueError: If prediction and target shapes differ.
@@ -87,7 +87,7 @@ def compute_l1_ssim_mean_components(
             data_range=data_range,
         ),
     )
-    ssim_loss = 1.0 - ssim
+    ssim_loss = -1.0 * ssim
     total = l1 + ssim_weight * ssim_loss
     return {"l1": l1, "ssim": ssim_loss, "total": total}
 
@@ -122,7 +122,7 @@ def compute_ssim_loss_per_sample(
     targets: torch.Tensor,
     data_range: Optional[float] = None,
 ) -> torch.Tensor:
-    """Compute one ``1 - SSIM`` value per sample.
+    """Compute one ``-1 * SSIM`` value per sample.
 
     Args:
         generated_predictions: Model predictions.
@@ -156,4 +156,4 @@ def compute_ssim_loss_per_sample(
         per_sample_ssim,
         torch.tensor(0.0, device=generated_predictions.device, dtype=generated_predictions.dtype),
     )
-    return 1.0 - finite_ssim
+    return -1.0 * finite_ssim

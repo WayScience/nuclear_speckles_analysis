@@ -15,7 +15,7 @@ class L1SSIMLoss(nn.Module):
         """Store SSIM weighting and optional fixed intensity range.
 
         Args:
-            ssim_weight: Multiplier applied to ``1 - ssim``.
+            ssim_weight: Multiplier applied to ``-1 * ssim``.
             data_range: Optional fixed data range for SSIM. If omitted, the
                 range is derived from the current batch.
 
@@ -47,7 +47,7 @@ class L1SSIMLoss(nn.Module):
 
         Returns:
             Dictionary containing scalar ``l1``, ``ssim``, and ``total`` loss
-            components, where ``ssim`` stores ``1 - SSIM``.
+            components, where ``ssim`` stores ``-1 * SSIM``.
 
         Raises:
             ValueError: If prediction and target shapes differ.

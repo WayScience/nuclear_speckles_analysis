@@ -21,7 +21,7 @@ class L1SSIMLossMetric(AbstractMetric):
         """Configure epoch-level mixed-loss accumulation.
 
         Args:
-            ssim_weight: Multiplier applied to ``1 - ssim``.
+            ssim_weight: Multiplier applied to ``-1 * ssim``.
             data_range: Optional fixed intensity range for SSIM. If omitted, the
                 range is derived from each evaluation batch.
             use_logits: Whether caller should provide logits instead of
@@ -97,7 +97,7 @@ class L1SSIMLossMetric(AbstractMetric):
         """Compute averaged mixed-loss values and standard deviations.
 
         Returns:
-            Dictionary containing mean and std values for the L1, SSIM-loss, and
+            Dictionary containing mean and std values for the L1, SSIM-derived, and
             total-loss components.
         """
 
