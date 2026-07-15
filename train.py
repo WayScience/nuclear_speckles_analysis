@@ -26,7 +26,7 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
     ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.L1Loss import L1Loss
+from losses.L1SSIMLoss import L1SSIMLoss
 from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
@@ -259,6 +259,7 @@ class OptimizationManager:
             1e-3 / math.sqrt(max_batch_size),
             log=True,
         )
+        ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1e-1, log=True)
         lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
@@ -283,7 +284,7 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1Loss()
+        loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
         loss_callbacks = L1(device=device)
         metrics = [
             L2(device=device),
@@ -302,6 +303,7 @@ class OptimizationManager:
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("lr_factor", lr_factor)
+            mlflow.log_param("ssim_weight", ssim_weight)
             mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("eval_use_amp", int(eval_use_amp))
             mlflow.log_param("train_use_amp", int(train_use_amp))
@@ -357,7 +359,8 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - Train-split z-score normalization for inputs and targets
-- L1 optimization objective in z-score space with denormalized L2, PSNR, SSIM,
+- L1 plus Optuna-weighted SSIM optimization objective in z-score space with
+  denormalized L2, PSNR, SSIM,
   and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
