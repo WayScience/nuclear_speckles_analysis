@@ -37,13 +37,28 @@ class L1SSIMLoss(nn.Module):
         targets: torch.Tensor,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Compute composite batch loss for one optimization step."""
+        """Compute composite L1 and SSIM batch loss for one optimization step.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            **kwargs: Additional unused loss arguments.
+
+        Returns:
+            Dictionary containing scalar ``l1``, ``ssim``, and ``total`` loss
+            components, where ``ssim`` stores ``1 - SSIM``.
+
+        Raises:
+            ValueError: If prediction and target shapes differ.
+        """
 
         if generated_predictions.shape != targets.shape:
             raise ValueError("The generated predictions and targets must be the same shape.")
 
         l1 = torch.nn.functional.l1_loss(generated_predictions, targets, reduction="mean")
         if self.data_range is None:
+            # Derive a positive SSIM range from the current batch so the loss can
+            # operate directly in z-score space without a fixed intensity bound.
             batch_max = torch.maximum(generated_predictions.max(), targets.max())
             batch_min = torch.minimum(generated_predictions.min(), targets.min())
             ssim_data_range = (batch_max - batch_min).clamp_min(torch.finfo(torch.float32).eps)

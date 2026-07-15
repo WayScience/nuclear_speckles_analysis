@@ -259,6 +259,8 @@ class OptimizationManager:
             1e-3 / math.sqrt(max_batch_size),
             log=True,
         )
+        # Keep the auxiliary SSIM term meaningful without overwhelming the L1
+        # objective early in training.
         ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1e-1, log=True)
         lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
