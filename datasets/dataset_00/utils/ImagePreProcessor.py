@@ -69,10 +69,7 @@ class ImagePreProcessor:
         if img.ndim != 2:
             raise ValueError(f"Expected 2D image, got shape {img.shape}")
 
-        return torch.from_numpy(img).unsqueeze(0).to(
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return torch.from_numpy(img).unsqueeze(0).to(dtype=torch.float32)
 
     def __call__(self, input_img: np.ndarray, target_img: np.ndarray) -> dict[str, Any]:
         """Apply transforms, normalize, and format paired images.
