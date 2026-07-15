@@ -182,13 +182,13 @@ def compute_training_image_stats(
 
     for idx in train_indices:
         sample = manifest_rows[idx]
-        input_image = tifffile.imread(sample["input_path"]).astype(np.float64)
-        target_image = tifffile.imread(sample["target_path"]).astype(np.float64)
+        input_image = tifffile.imread(sample["input_path"])
+        target_image = tifffile.imread(sample["target_path"])
 
-        input_sum += float(input_image.sum())
-        input_sum_sq += float(np.square(input_image).sum())
-        target_sum += float(target_image.sum())
-        target_sum_sq += float(np.square(target_image).sum())
+        input_sum += float(input_image.sum(dtype=np.float64))
+        input_sum_sq += float(np.square(input_image, dtype=np.float64).sum())
+        target_sum += float(target_image.sum(dtype=np.float64))
+        target_sum_sq += float(np.square(target_image, dtype=np.float64).sum())
         input_count += int(input_image.size)
         target_count += int(target_image.size)
 
