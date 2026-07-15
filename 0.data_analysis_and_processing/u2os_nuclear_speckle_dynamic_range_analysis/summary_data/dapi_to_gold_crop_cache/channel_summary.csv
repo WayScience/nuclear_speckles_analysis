@@ -1,0 +1,3 @@
+channel_name,channel_column_name,n_images,dtype,bit_depth,dtype_max,height,width,global_min,global_max,median_image_min,median_image_max,p99_image_max,median_image_mean,median_image_std,median_dynamic_range,median_effective_dynamic_range,median_zero_fraction,total_pixels,images_with_any_16383,pixels_at_16383,fraction_of_all_pixels_at_16383,images_with_any_65535,pixels_at_65535,fraction_of_all_pixels_at_65535
+DAPI,CH01,8176,uint16,16,65535,128,128,0.0,7923.0,90.0,2650.0,5859.0,310.6206970214844,390.62939453125,2555.0,1934.0,0.0,133955584,0,0,0.0,0,0,0.0
+GOLD,CH03,8176,uint16,16,65535,128,128,0.0,16383.0,47.0,1290.0,7782.75,167.38211059570312,90.61691284179688,1231.5,496.1700000000001,0.0,133955584,22,369,2.75464440511864e-06,0,0,0.0
