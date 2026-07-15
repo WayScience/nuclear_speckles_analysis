@@ -86,14 +86,16 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
         """
 
         model.eval()
+        model_device = next(model.parameters()).device
+        model_input = input_example.to(model_device)
         with torch.no_grad():
             with torch.amp.autocast(
                 enabled=self.use_amp,
-                device_type=input_example.device.type,
+                device_type=model_device.type,
                 dtype=self.amp_dtype,
             ):
                 output_example = (
-                    self.image_postprocessor(model(input_example))
+                    self.image_postprocessor(model(model_input))
                     .detach()
                     .float()
                     .cpu()
