@@ -18,7 +18,21 @@ class L1SSIMLossMetric(AbstractMetric):
         use_logits: bool = True,
         device: Union[str, torch.device] = "cuda",
     ):
-        """Configure epoch-level mixed-loss accumulation."""
+        """Configure epoch-level mixed-loss accumulation.
+
+        Args:
+            ssim_weight: Multiplier applied to ``1 - ssim``.
+            data_range: Optional fixed intensity range for SSIM. If omitted, the
+                range is derived from each evaluation batch.
+            use_logits: Whether caller should provide logits instead of
+                postprocessed outputs. This defaults to ``True`` so model
+                selection matches the z-score training objective.
+            device: Device for accumulation buffers.
+
+        Raises:
+            ValueError: If ``ssim_weight`` is negative or ``data_range`` is not
+                positive when provided.
+        """
 
         super().__init__()
         if ssim_weight < 0:
@@ -47,7 +61,16 @@ class L1SSIMLossMetric(AbstractMetric):
         targets: torch.Tensor,
         **kwargs,
     ) -> None:
-        """Accumulate per-sample mixed-loss statistics for one evaluation batch."""
+        """Accumulate per-sample mixed-loss statistics for one evaluation batch.
+
+        Args:
+            generated_predictions: Model predictions.
+            targets: Ground-truth targets with matching shape.
+            **kwargs: Additional unused metric arguments.
+
+        Raises:
+            ValueError: If prediction and target shapes differ.
+        """
 
         per_sample_l1 = compute_l1_per_sample(
             generated_predictions=generated_predictions,
@@ -71,7 +94,12 @@ class L1SSIMLossMetric(AbstractMetric):
         self.forward(generated_predictions=generated_predictions, targets=targets, **kwargs)
 
     def compute(self) -> dict[str, float]:
-        """Compute averaged mixed-loss values and standard deviations."""
+        """Compute averaged mixed-loss values and standard deviations.
+
+        Returns:
+            Dictionary containing mean and std values for the L1, SSIM-loss, and
+            total-loss components.
+        """
 
         l1_stats = self.l1_stats.compute()
         ssim_stats = self.ssim_stats.compute()

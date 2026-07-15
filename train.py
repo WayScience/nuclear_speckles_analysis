@@ -287,6 +287,8 @@ class OptimizationManager:
         }
 
         loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
+        # Keep checkpoint selection aligned with the z-score training objective
+        # while denormalized image-quality metrics continue to be logged separately.
         loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
         metrics = [
             L2(device=device),
