@@ -252,16 +252,12 @@ class OptimizationManager:
 
         # Couple learning rate to batch size so Optuna searches a scaling factor
         # while the derived rate stays within the previous learning-rate bounds.
-        batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
-        lr_factor = trial.suggest_float(
-            "lr_factor",
-            1e-5,
-            1e-3 / math.sqrt(max_batch_size),
-            log=True,
-        )
+        batch_size = 4
+        lr_factor = 5.983642900712674e-05
+
         # Keep the auxiliary SSIM term meaningful without overwhelming the L1
         # objective early in training.
-        ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1.0, log=True)
+        ssim_weight = 0.9812443957944074
         lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
@@ -481,7 +477,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 20,
+    "early_stopping_counter_threshold": 300,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1
