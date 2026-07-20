@@ -9,7 +9,7 @@ from .utils.streaming_stats import StreamingScalarStats
 
 
 class L1SSIMLossMetric(AbstractMetric):
-    """Accumulate z-score-space L1, SSIM loss, and total loss for evaluation."""
+    """Accumulate normalized-space L1, SSIM loss, and total loss for evaluation."""
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class L1SSIMLossMetric(AbstractMetric):
                 range is derived from each evaluation batch.
             use_logits: Whether caller should provide logits instead of
                 postprocessed outputs. This defaults to ``True`` so model
-                selection matches the z-score training objective.
+                selection matches the normalized training objective.
             device: Device for accumulation buffers.
 
         Raises:
