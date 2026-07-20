@@ -32,26 +32,42 @@ class ImagePreProcessor:
 
     def set_image_specs(
         self,
-        input_mean: float | None = None,
-        input_std: float | None = None,
-        target_mean: float | None = None,
-        target_std: float | None = None,
+        input_percentile_lower_value: float | None = None,
+        input_percentile_upper_value: float | None = None,
+        target_percentile_lower_value: float | None = None,
+        target_percentile_upper_value: float | None = None,
         **kwargs,
     ) -> None:
-        """Store z-score normalization statistics inferred from training data.
+        """Store robust percentile normalization bounds inferred from training data.
 
         Args:
-            input_mean: Mean pixel intensity used to center inputs.
-            input_std: Standard deviation used to scale inputs.
-            target_mean: Mean pixel intensity used to center targets.
-            target_std: Standard deviation used to scale targets.
+            input_percentile_lower_value: Lower train-split clipping bound for inputs.
+            input_percentile_upper_value: Upper train-split clipping bound for inputs.
+            target_percentile_lower_value: Lower train-split clipping bound for targets.
+            target_percentile_upper_value: Upper train-split clipping bound for targets.
             **kwargs: Additional image spec keys ignored by this preprocessor.
         """
 
-        self.input_mean = None if input_mean is None else float(input_mean)
-        self.input_std = None if input_std is None else float(input_std)
-        self.target_mean = None if target_mean is None else float(target_mean)
-        self.target_std = None if target_std is None else float(target_std)
+        self.input_lower_value = (
+            None
+            if input_percentile_lower_value is None
+            else float(input_percentile_lower_value)
+        )
+        self.input_upper_value = (
+            None
+            if input_percentile_upper_value is None
+            else float(input_percentile_upper_value)
+        )
+        self.target_lower_value = (
+            None
+            if target_percentile_lower_value is None
+            else float(target_percentile_lower_value)
+        )
+        self.target_upper_value = (
+            None
+            if target_percentile_upper_value is None
+            else float(target_percentile_upper_value)
+        )
 
     def format_img(self, img: np.ndarray) -> torch.Tensor:
         """Convert a normalized 2D numpy image into a channel-first tensor.
@@ -82,8 +98,7 @@ class ImagePreProcessor:
             Dictionary containing formatted ``input_image`` and ``target_image`` tensors.
 
         Raises:
-            ValueError: If z-score statistics are missing or standard deviations
-                are non-positive.
+            ValueError: If robust percentile bounds are missing or invalid.
         """
 
         if self.input_transform is not None:
@@ -92,13 +107,32 @@ class ImagePreProcessor:
         if self.target_transform is not None:
             target_img = self.target_transform(image=target_img)["image"]
 
-        if None in (self.input_mean, self.input_std, self.target_mean, self.target_std):
-            raise ValueError("Z-score normalization statistics must be set before loading data")
-        if self.input_std <= 0 or self.target_std <= 0:
-            raise ValueError("Z-score standard deviations must be positive")
+        if None in (
+            self.input_lower_value,
+            self.input_upper_value,
+            self.target_lower_value,
+            self.target_upper_value,
+        ):
+            raise ValueError(
+                "Robust percentile normalization bounds must be set before loading data"
+            )
+        if (
+            self.input_lower_value >= self.input_upper_value
+            or self.target_lower_value >= self.target_upper_value
+        ):
+            raise ValueError("Robust percentile normalization bounds must be increasing")
 
-        input_img = (input_img - self.input_mean) / self.input_std
-        target_img = (target_img - self.target_mean) / self.target_std
+        input_img = np.clip(input_img, self.input_lower_value, self.input_upper_value)
+        input_img = (input_img - self.input_lower_value) / (
+            self.input_upper_value - self.input_lower_value
+        )
+        input_img = np.clip(input_img, 0.0, 1.0)
+
+        target_img = np.clip(target_img, self.target_lower_value, self.target_upper_value)
+        target_img = (target_img - self.target_lower_value) / (
+            self.target_upper_value - self.target_lower_value
+        )
+        target_img = np.clip(target_img, 0.0, 1.0)
 
         return {
             "input_image": self.format_img(input_img),
