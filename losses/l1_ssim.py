@@ -43,7 +43,7 @@ def resolve_ssim_data_range(
         return data_range
 
     # Derive a positive SSIM range from the current batch so the objective can
-    # operate directly in z-score space without a fixed intensity bound.
+    # operate directly in normalized space without a fixed intensity bound.
     batch_max = torch.maximum(generated_predictions.max(), targets.max())
     batch_min = torch.minimum(generated_predictions.min(), targets.min())
     return (batch_max - batch_min).clamp_min(

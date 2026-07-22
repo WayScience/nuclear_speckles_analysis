@@ -156,57 +156,60 @@ max_batch_size = 8
 def compute_training_image_stats(
     manifest_rows: list[dict[str, str]],
     train_indices: list[int],
+    input_lower_percentile: float,
+    input_upper_percentile: float,
+    target_lower_percentile: float,
+    target_upper_percentile: float,
 ) -> dict[str, float]:
-    """Compute train-split image mean and std for z-score normalization.
+    """Compute train-split robust percentile bounds for normalization.
 
     Args:
         manifest_rows: Full manifest rows backing the crop dataset.
         train_indices: Dataset indices assigned to the training split.
 
     Returns:
-        Dictionary containing train-split input/target means and standard deviations.
+        Dictionary containing train-split input/target percentile bounds.
 
     Raises:
-        ValueError: If the training split is empty or any variance is non-positive.
+        ValueError: If the training split is empty or any percentile bounds collapse.
     """
 
     if not train_indices:
-        raise ValueError("Training split is empty; cannot compute z-score statistics.")
+        raise ValueError("Training split is empty; cannot compute percentile statistics.")
 
-    input_sum = 0.0
-    input_sum_sq = 0.0
-    target_sum = 0.0
-    target_sum_sq = 0.0
-    input_count = 0
-    target_count = 0
+    input_pixels: list[np.ndarray] = []
+    target_pixels: list[np.ndarray] = []
 
     for idx in train_indices:
         sample = manifest_rows[idx]
         input_image = tifffile.imread(sample["input_path"])
         target_image = tifffile.imread(sample["target_path"])
 
-        input_sum += float(input_image.sum(dtype=np.float64))
-        input_sum_sq += float(np.square(input_image, dtype=np.float64).sum())
-        target_sum += float(target_image.sum(dtype=np.float64))
-        target_sum_sq += float(np.square(target_image, dtype=np.float64).sum())
-        input_count += int(input_image.size)
-        target_count += int(target_image.size)
+        input_pixels.append(input_image.reshape(-1).astype(np.float32, copy=False))
+        target_pixels.append(target_image.reshape(-1).astype(np.float32, copy=False))
 
-    input_mean = input_sum / input_count
-    target_mean = target_sum / target_count
-    input_var = (input_sum_sq / input_count) - (input_mean**2)
-    target_var = (target_sum_sq / target_count) - (target_mean**2)
-    input_std = math.sqrt(max(input_var, 0.0))
-    target_std = math.sqrt(max(target_var, 0.0))
+    input_pixels_concat = np.concatenate(input_pixels)
+    target_pixels_concat = np.concatenate(target_pixels)
 
-    if input_std <= 0 or target_std <= 0:
-        raise ValueError("Training-split z-score standard deviations must be positive.")
+    input_lower_value = float(np.percentile(input_pixels_concat, input_lower_percentile))
+    input_upper_value = float(np.percentile(input_pixels_concat, input_upper_percentile))
+    target_lower_value = float(np.percentile(target_pixels_concat, target_lower_percentile))
+    target_upper_value = float(np.percentile(target_pixels_concat, target_upper_percentile))
+
+    if input_lower_value >= input_upper_value or target_lower_value >= target_upper_value:
+        raise ValueError(
+            "Training-split percentile bounds must be strictly increasing."
+        )
 
     return {
-        "input_mean": input_mean,
-        "input_std": input_std,
-        "target_mean": target_mean,
-        "target_std": target_std,
+        "input_lower_percentile": input_lower_percentile,
+        "input_upper_percentile": input_upper_percentile,
+        "input_percentile_lower_value": input_lower_value,
+        "input_percentile_upper_value": input_upper_value,
+        "target_lower_percentile": target_lower_percentile,
+        "target_upper_percentile": target_upper_percentile,
+        "target_percentile_lower_value": target_lower_value,
+        "target_percentile_upper_value": target_upper_value,
     }
 
 
@@ -287,7 +290,7 @@ class OptimizationManager:
         }
 
         loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
-        # Keep checkpoint selection aligned with the z-score training objective
+        # Keep checkpoint selection aligned with the normalized training objective
         # while denormalized image-quality metrics continue to be logged separately.
         loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
         metrics = [
@@ -362,8 +365,8 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- Train-split z-score normalization for inputs and targets
-- L1 plus Optuna-weighted SSIM optimization objective in z-score space with
+- Train-split 1st/99th percentile normalization for inputs and targets
+- L1 plus Optuna-weighted SSIM optimization objective in normalized space with
   denormalized L2, PSNR, SSIM,
   and Pearson correlation metric logging
 """
@@ -427,23 +430,43 @@ bootstrap_hash_splitter = HashSplitter(
     val_frac=0.125,
 )
 bootstrap_hash_splitter.split_by_hash()
+input_lower_percentile = 1.0
+input_upper_percentile = 99.0
+target_lower_percentile = 1.0
+target_upper_percentile = 99.0
 training_stats = compute_training_image_stats(
     manifest_rows=manifest_nuclei,
     train_indices=bootstrap_hash_splitter.splits["train"],
+    input_lower_percentile=input_lower_percentile,
+    input_upper_percentile=input_upper_percentile,
+    target_lower_percentile=target_lower_percentile,
+    target_upper_percentile=target_upper_percentile,
 )
 image_specs = image_specs | training_stats
 
-mlflow.log_param("input_mean", image_specs["input_mean"])
-mlflow.log_param("input_std", image_specs["input_std"])
-mlflow.log_param("target_mean", image_specs["target_mean"])
-mlflow.log_param("target_std", image_specs["target_std"])
+mlflow.log_param("input_lower_percentile", image_specs["input_lower_percentile"])
+mlflow.log_param("input_upper_percentile", image_specs["input_upper_percentile"])
+mlflow.log_param(
+    "input_percentile_lower_value", image_specs["input_percentile_lower_value"]
+)
+mlflow.log_param(
+    "input_percentile_upper_value", image_specs["input_percentile_upper_value"]
+)
+mlflow.log_param("target_lower_percentile", image_specs["target_lower_percentile"])
+mlflow.log_param("target_upper_percentile", image_specs["target_upper_percentile"])
+mlflow.log_param(
+    "target_percentile_lower_value", image_specs["target_percentile_lower_value"]
+)
+mlflow.log_param(
+    "target_percentile_upper_value", image_specs["target_percentile_upper_value"]
+)
 
 image_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
 image_postprocessor = ImagePostProcessor(
-    input_mean=image_specs["input_mean"],
-    input_std=image_specs["input_std"],
-    target_mean=image_specs["target_mean"],
-    target_std=image_specs["target_std"],
+    input_lower_value=image_specs["input_percentile_lower_value"],
+    input_upper_value=image_specs["input_percentile_upper_value"],
+    target_lower_value=image_specs["target_percentile_lower_value"],
+    target_upper_value=image_specs["target_percentile_upper_value"],
 )
 
 crop_image_dataset = CellCropToCropDataset(
