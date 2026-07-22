@@ -70,8 +70,14 @@ def compute_l1_ssim_mean_components(
         components, where ``ssim`` stores ``-1 * SSIM``.
 
     Raises:
-        ValueError: If prediction and target shapes differ.
+        ValueError: If prediction and target shapes differ, ``ssim_weight`` is
+            negative, or ``data_range`` is not positive when provided.
     """
+
+    if ssim_weight < 0:
+        raise ValueError("ssim_weight must be non-negative")
+    if data_range is not None and data_range <= 0:
+        raise ValueError("data_range must be positive when provided")
 
     validate_prediction_shapes(
         generated_predictions=generated_predictions,
