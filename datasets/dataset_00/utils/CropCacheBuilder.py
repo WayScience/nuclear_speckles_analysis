@@ -10,6 +10,9 @@ import tifffile
 from skimage.transform import resize
 
 
+CROP_CACHE_VERSION = "5"
+
+
 @dataclass
 class CropCacheResult:
     """Output metadata returned after building or validating a crop cache.
@@ -551,6 +554,7 @@ def _build_filtered_profiles(
 
 def _validate_manifest(
     manifest_path: pathlib.Path,
+    crop_size: int,
     input_resolution: float | None,
     target_resolution: float | None,
 ) -> tuple[bool, list[dict[str, str]]]:
@@ -558,15 +562,17 @@ def _validate_manifest(
 
     Args:
         manifest_path: Path to the cache CSV manifest.
+        crop_size: Requested fixed crop size.
         input_resolution: Requested source microscope resolution.
         target_resolution: Requested target microscope resolution.
 
     Returns:
         Tuple of (is_valid, rows). Rows are returned only when valid.
 
-    The manifest is reusable only when its cached crop layout, on-disk file
-    paths, and stored resolution settings all match the current request. This
-    forces a rebuild when whole-image resampling settings change.
+    The manifest is reusable only when its cached crop layout, crop builder
+    version, source image selections, on-disk paths, and stored resolution
+    settings all match the current request. This forces a rebuild when
+    whole-image resampling or crop-generation behavior changes.
     """
 
     if not manifest_path.exists():
@@ -589,6 +595,8 @@ def _validate_manifest(
         "target_channel",
         "input_path",
         "target_path",
+        "crop_size",
+        "cache_version",
         "input_resolution",
         "target_resolution",
     }
@@ -603,10 +611,15 @@ def _validate_manifest(
     requested_target_resolution = (
         "" if target_resolution is None else f"{target_resolution:.6f}"
     )
+    requested_crop_size = str(int(crop_size))
 
     for row in rows:
         sample_id = row["sample_id"]
         if not center_x_pattern.search(sample_id) or not center_y_pattern.search(sample_id):
+            return False, []
+        if row["cache_version"] != CROP_CACHE_VERSION:
+            return False, []
+        if row["crop_size"] != requested_crop_size:
             return False, []
         if row["input_resolution"] != requested_input_resolution:
             return False, []
@@ -616,7 +629,10 @@ def _validate_manifest(
         # Reuse is only safe when paths and sample IDs still match on-disk files.
         input_path = pathlib.Path(row["input_path"])
         target_path = pathlib.Path(row["target_path"])
-        if not input_path.exists() or not target_path.exists():
+        if (
+            not input_path.exists()
+            or not target_path.exists()
+        ):
             return False, []
 
         is_legacy_layout = input_path.stem == sample_id and target_path.stem == sample_id
@@ -720,6 +736,7 @@ def ensure_dapi_to_gold_cache(
 
     is_valid, existing_rows = _validate_manifest(
         manifest_path=manifest_path,
+        crop_size=crop_size,
         input_resolution=input_resolution,
         target_resolution=target_resolution,
     )
@@ -807,8 +824,13 @@ def ensure_dapi_to_gold_cache(
                 axis=1,
                 result_type="expand",
             )
-            transformed_bboxes.columns = bbox_cols
-            image_df[bbox_cols] = transformed_bboxes.astype(int)
+            transformed_bboxes.columns = [
+                "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
+                "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
+                "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
+                "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
+            ]
+            image_df[transformed_bboxes.columns] = transformed_bboxes.astype(int)
 
         for _, nucleus in image_df.iterrows():
             x0 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X"])
@@ -888,6 +910,8 @@ def ensure_dapi_to_gold_cache(
                     "target_channel": target_channel,
                     "input_path": str(input_path.resolve()),
                     "target_path": str(target_path.resolve()),
+                    "crop_size": str(crop_size),
+                    "cache_version": CROP_CACHE_VERSION,
                     "input_resolution": "" if input_resolution is None else f"{input_resolution:.6f}",
                     "target_resolution": "" if target_resolution is None else f"{target_resolution:.6f}",
                     "cellprofiler_center_x": cellprofiler_center_x,
@@ -911,6 +935,8 @@ def ensure_dapi_to_gold_cache(
                 "target_channel",
                 "input_path",
                 "target_path",
+                "crop_size",
+                "cache_version",
                 "input_resolution",
                 "target_resolution",
                 "cellprofiler_center_x",

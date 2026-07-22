@@ -81,15 +81,18 @@ class EpochEvaluatorCallback(BaseCallback):
         """
 
         model.eval()
+        model_device = next(model.parameters()).device
 
         with torch.no_grad():
             for batch_idx, samples in enumerate(dataloader):
+                inputs = samples["input"].to(model_device)
+                targets = samples["target"].to(model_device)
                 with torch.amp.autocast(
                     enabled=self.use_amp,
-                    device_type=samples["input"].device.type,
+                    device_type=model_device.type,
                     dtype=self.amp_dtype,
                 ):
-                    generated_predictions = model(samples["input"])
+                    generated_predictions = model(inputs)
                     postprocessed_predictions = self.image_postprocessor(
                         generated_predictions
                     )
@@ -98,7 +101,7 @@ class EpochEvaluatorCallback(BaseCallback):
                     postprocessed_predictions
                 )
                 denormalized_targets = self.image_postprocessor.denormalize_target(
-                    samples["target"]
+                    targets
                 )
 
                 self.loss.update(
@@ -107,7 +110,7 @@ class EpochEvaluatorCallback(BaseCallback):
                         if self.loss.use_logits
                         else denormalized_predictions
                     ),
-                    targets=(samples["target"] if self.loss.use_logits else denormalized_targets),
+                    targets=(targets if self.loss.use_logits else denormalized_targets),
                     loss_mask=samples.get("loss_mask"),
                 )
 
@@ -118,7 +121,7 @@ class EpochEvaluatorCallback(BaseCallback):
                             if metric.use_logits
                             else denormalized_predictions
                         ),
-                        targets=(samples["target"] if metric.use_logits else denormalized_targets),
+                        targets=(targets if metric.use_logits else denormalized_targets),
                         loss_mask=samples.get("loss_mask"),
                     )
 

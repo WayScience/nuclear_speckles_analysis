@@ -26,9 +26,9 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
     ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.L1Loss import L1Loss
-from metrics.L1 import L1
+from losses.L1SSIMLoss import L1SSIMLoss
 from metrics.L2 import L2
+from metrics.L1SSIMLossMetric import L1SSIMLossMetric
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
@@ -252,13 +252,12 @@ class OptimizationManager:
 
         # Couple learning rate to batch size so Optuna searches a scaling factor
         # while the derived rate stays within the previous learning-rate bounds.
-        batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
-        lr_factor = trial.suggest_float(
-            "lr_factor",
-            1e-5,
-            1e-3 / math.sqrt(max_batch_size),
-            log=True,
-        )
+        batch_size = 4
+        lr_factor = 5.983642900712674e-05
+
+        # Keep the auxiliary SSIM term meaningful without overwhelming the L1
+        # objective early in training.
+        ssim_weight = 0.9812443957944074
         lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
 
@@ -283,8 +282,10 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1Loss()
-        loss_callbacks = L1(device=device)
+        loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
+        # Keep checkpoint selection aligned with the z-score training objective
+        # while denormalized image-quality metrics continue to be logged separately.
+        loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
         metrics = [
             L2(device=device),
             PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
@@ -302,6 +303,7 @@ class OptimizationManager:
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("lr_factor", lr_factor)
+            mlflow.log_param("ssim_weight", ssim_weight)
             mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("eval_use_amp", int(eval_use_amp))
             mlflow.log_param("train_use_amp", int(train_use_amp))
@@ -357,7 +359,8 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - Train-split z-score normalization for inputs and targets
-- L1 optimization objective in z-score space with denormalized L2, PSNR, SSIM,
+- L1 plus Optuna-weighted SSIM optimization objective in z-score space with
+  denormalized L2, PSNR, SSIM,
   and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
@@ -474,7 +477,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 15,
+    "early_stopping_counter_threshold": 300,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1

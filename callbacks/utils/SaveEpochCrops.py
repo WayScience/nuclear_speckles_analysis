@@ -150,9 +150,10 @@ class SaveEpochCrops:
             Postprocessed prediction tensor.
         """
 
+        model_device = next(model.parameters()).device
         with torch.no_grad():
-            prediction = model(image.unsqueeze(0)).squeeze(0)
-        return self.image_postprocessor(prediction)
+            prediction = model(image.unsqueeze(0).to(model_device)).squeeze(0)
+        return self.image_postprocessor(prediction).detach().cpu()
 
     def __call__(self, model: torch.nn.Module, epoch: int) -> None:
         """Save input, target, and generated prediction images for one epoch.
