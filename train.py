@@ -262,7 +262,7 @@ class OptimizationManager:
             1e-3 / math.sqrt(max_batch_size),
             log=True,
         )
-        # Keep the auxiliary SSIM term meaningful without overwhelming the L1
+        # Keep the auxiliary MS-SSIM term meaningful without overwhelming the L1
         # objective early in training.
         ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1.0, log=True)
         lr = lr_factor * math.sqrt(batch_size)
@@ -289,10 +289,15 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
-        # Keep checkpoint selection aligned with the normalized training objective
-        # while denormalized image-quality metrics continue to be logged separately.
-        loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
+        loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight, data_range=1.0)
+        # Keep checkpoint selection aligned with the normalized L1 + MS-SSIM
+        # objective while denormalized image-quality metrics continue to be
+        # logged separately.
+        loss_callbacks = L1SSIMLossMetric(
+            ssim_weight=ssim_weight,
+            data_range=1.0,
+            device=device,
+        )
         metrics = [
             L2(device=device),
             PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
@@ -366,7 +371,7 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - Train-split 1st/99th percentile normalization for inputs and targets
-- L1 plus Optuna-weighted SSIM optimization objective in normalized space with
+- L1 plus Optuna-weighted MS-SSIM optimization objective in normalized space with
   denormalized L2, PSNR, SSIM,
   and Pearson correlation metric logging
 """
