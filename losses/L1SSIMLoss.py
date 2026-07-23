@@ -7,16 +7,16 @@ from .l1_ssim import compute_l1_ssim_mean_components
 
 
 class L1SSIMLoss(nn.Module):
-    """Composite training loss combining L1 and SSIM terms."""
+    """Composite training loss combining L1 and MS-SSIM terms."""
 
     loss_name = "l1_ssim"
 
     def __init__(self, ssim_weight: float, data_range: Optional[float] = None) -> None:
-        """Store SSIM weighting and optional fixed intensity range.
+        """Store MS-SSIM weighting and optional fixed intensity range.
 
         Args:
-            ssim_weight: Multiplier applied to ``-1 * ssim``.
-            data_range: Optional fixed data range for SSIM. If omitted, the
+            ssim_weight: Multiplier applied to ``-1 * ms_ssim``.
+            data_range: Optional fixed data range for MS-SSIM. If omitted, the
                 range is derived from the current batch.
 
         Raises:
@@ -38,7 +38,7 @@ class L1SSIMLoss(nn.Module):
         targets: torch.Tensor,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Compute composite L1 and SSIM batch loss for one optimization step.
+        """Compute composite L1 and MS-SSIM batch loss for one optimization step.
 
         Args:
             generated_predictions: Model predictions.
@@ -47,7 +47,7 @@ class L1SSIMLoss(nn.Module):
 
         Returns:
             Dictionary containing scalar ``l1``, ``ssim``, and ``total`` loss
-            components, where ``ssim`` stores ``-1 * SSIM``.
+            components, where ``ssim`` stores ``-1 * MS-SSIM``.
 
         Raises:
             ValueError: If prediction and target shapes differ.

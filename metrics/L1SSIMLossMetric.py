@@ -9,7 +9,7 @@ from .utils.streaming_stats import StreamingScalarStats
 
 
 class L1SSIMLossMetric(AbstractMetric):
-    """Accumulate normalized-space L1, SSIM loss, and total loss for evaluation."""
+    """Accumulate normalized-space L1, MS-SSIM loss, and total loss for evaluation."""
 
     def __init__(
         self,
@@ -21,8 +21,8 @@ class L1SSIMLossMetric(AbstractMetric):
         """Configure epoch-level mixed-loss accumulation.
 
         Args:
-            ssim_weight: Multiplier applied to ``-1 * ssim``.
-            data_range: Optional fixed intensity range for SSIM. If omitted, the
+            ssim_weight: Multiplier applied to ``-1 * ms_ssim``.
+            data_range: Optional fixed intensity range for MS-SSIM. If omitted, the
                 range is derived from each evaluation batch.
             use_logits: Whether caller should provide logits instead of
                 postprocessed outputs. This defaults to ``True`` so model
