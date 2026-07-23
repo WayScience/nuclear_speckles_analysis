@@ -83,7 +83,7 @@ In practice this allows training and evaluation inference behavior to be configu
 
 ## Loss and Metrics
 
-- Optimization loss: L1
+- Optimization loss: L1 plus MS-SSIM in normalized `[0, 1]` space with fixed `data_range=1.0`
 - Logged metrics: L1, L2, PSNR, SSIM, Pearson correlation
 
 Metrics are implemented in `metrics/` and logged through `callbacks/CallbackPipeline.py`.
