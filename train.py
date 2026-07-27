@@ -15,8 +15,8 @@ import joblib
 import mlflow
 import numpy as np
 import optuna
-import torch
 import tifffile
+import torch
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
@@ -27,8 +27,8 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.L1SSIMLoss import L1SSIMLoss
-from metrics.L2 import L2
 from metrics.L1SSIMLossMetric import L1SSIMLossMetric
+from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
@@ -175,7 +175,9 @@ def compute_training_image_stats(
     """
 
     if not train_indices:
-        raise ValueError("Training split is empty; cannot compute percentile statistics.")
+        raise ValueError(
+            "Training split is empty; cannot compute percentile statistics."
+        )
 
     input_pixels: list[np.ndarray] = []
     target_pixels: list[np.ndarray] = []
@@ -191,12 +193,23 @@ def compute_training_image_stats(
     input_pixels_concat = np.concatenate(input_pixels)
     target_pixels_concat = np.concatenate(target_pixels)
 
-    input_lower_value = float(np.percentile(input_pixels_concat, input_lower_percentile))
-    input_upper_value = float(np.percentile(input_pixels_concat, input_upper_percentile))
-    target_lower_value = float(np.percentile(target_pixels_concat, target_lower_percentile))
-    target_upper_value = float(np.percentile(target_pixels_concat, target_upper_percentile))
+    input_lower_value = float(
+        np.percentile(input_pixels_concat, input_lower_percentile)
+    )
+    input_upper_value = float(
+        np.percentile(input_pixels_concat, input_upper_percentile)
+    )
+    target_lower_value = float(
+        np.percentile(target_pixels_concat, target_lower_percentile)
+    )
+    target_upper_value = float(
+        np.percentile(target_pixels_concat, target_upper_percentile)
+    )
 
-    if input_lower_value >= input_upper_value or target_lower_value >= target_upper_value:
+    if (
+        input_lower_value >= input_upper_value
+        or target_lower_value >= target_upper_value
+    ):
         raise ValueError(
             "Training-split percentile bounds must be strictly increasing."
         )
@@ -264,16 +277,22 @@ class OptimizationManager:
         )
         # Keep the auxiliary SSIM term meaningful without overwhelming the L1
         # objective early in training.
-        ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1.0, log=True)
+        ssim_weight = trial.suggest_float("ssim_weight", 1e-6, 1e-3, log=True)
         lr = lr_factor * math.sqrt(batch_size)
-        eval_batch_size = batch_size if requested_eval_batch_size is None else requested_eval_batch_size
+        eval_batch_size = (
+            batch_size
+            if requested_eval_batch_size is None
+            else requested_eval_batch_size
+        )
 
         # Optimization can tune the training batch size without forcing the same
         # setting on epoch-end evaluation passes.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
-        eval_train_dataloader, eval_val_dataloader, _ = self.hash_splitter.build_loaders(
-            batch_size=eval_batch_size,
-            train_shuffle=False,
+        eval_train_dataloader, eval_val_dataloader, _ = (
+            self.hash_splitter.build_loaders(
+                batch_size=eval_batch_size,
+                train_shuffle=False,
+            )
         )
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
@@ -365,10 +384,9 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
+- No final activation function after the model output (such as sigmoid)
 - Train-split 1st/99th percentile normalization for inputs and targets
-- L1 plus Optuna-weighted SSIM optimization objective in normalized space with
-  denormalized L2, PSNR, SSIM,
-  and Pearson correlation metric logging
+- L1 plus Optuna-weighted MS-SSIM optimization objective in normalized space with denormalized L2, PSNR, SSIM, and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
@@ -504,7 +522,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 20,
+    "early_stopping_counter_threshold": 300,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1

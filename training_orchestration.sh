@@ -10,8 +10,8 @@ mlflow run . -e train_model \
   --env-manager local \
   --experiment-name "u2os_nuclear_speckle_prediction_dapi_gold" \
   -P dataset=u2os \
-  -P epochs=100 \
-  -P n_trials=15 \
+  -P epochs=300 \
+  -P n_trials=5 \
   -P max_train_batches=-1 \
   -P max_eval_batches=-1 \
   -P eval_batch_size=10 \
