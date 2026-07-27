@@ -1,7 +1,15 @@
 from typing import Optional
 
 import torch
-from torchmetrics.functional.image import structural_similarity_index_measure
+from torchmetrics.functional.image import (
+    multiscale_structural_similarity_index_measure,
+)
+
+
+# Default 5-scale MS-SSIM from TorchMetrics requires images larger than 160x160
+# with the standard 11x11 kernel, so use the first four canonical scale weights
+# for this repo's 128x128 crops.
+MS_SSIM_BETAS_128 = (0.0448, 0.2856, 0.3001, 0.2363)
 
 
 def validate_prediction_shapes(
@@ -27,12 +35,12 @@ def resolve_ssim_data_range(
     targets: torch.Tensor,
     data_range: Optional[float] = None,
 ) -> torch.Tensor | float:
-    """Return a positive SSIM data range for the current tensors.
+    """Return a positive MS-SSIM data range for the current tensors.
 
     Args:
         generated_predictions: Model predictions.
         targets: Ground-truth targets.
-        data_range: Optional fixed intensity range for SSIM.
+        data_range: Optional fixed intensity range for MS-SSIM.
 
     Returns:
         Either the caller-provided float range or a scalar tensor derived from
@@ -42,7 +50,7 @@ def resolve_ssim_data_range(
     if data_range is not None:
         return data_range
 
-    # Derive a positive SSIM range from the current batch so the objective can
+    # Derive a positive MS-SSIM range from the current batch so the objective can
     # operate directly in normalized space without a fixed intensity bound.
     batch_max = torch.maximum(generated_predictions.max(), targets.max())
     batch_min = torch.minimum(generated_predictions.min(), targets.min())
@@ -57,17 +65,17 @@ def compute_l1_ssim_mean_components(
     ssim_weight: float,
     data_range: Optional[float] = None,
 ) -> dict[str, torch.Tensor]:
-    """Compute mean L1, SSIM loss, and total loss for one batch.
+    """Compute mean L1, MS-SSIM loss, and total loss for one batch.
 
     Args:
         generated_predictions: Model predictions.
         targets: Ground-truth targets with matching shape.
-        ssim_weight: Multiplier applied to ``-1 * ssim``.
-        data_range: Optional fixed intensity range for SSIM.
+        ssim_weight: Multiplier applied to ``-1 * ms_ssim``.
+        data_range: Optional fixed intensity range for MS-SSIM.
 
     Returns:
         Dictionary containing scalar ``l1``, ``ssim``, and ``total`` loss
-        components, where ``ssim`` stores ``-1 * SSIM``.
+        components, where ``ssim`` stores ``-1 * MS-SSIM``.
 
     Raises:
         ValueError: If prediction and target shapes differ.
@@ -78,7 +86,7 @@ def compute_l1_ssim_mean_components(
         targets=targets,
     )
     l1 = torch.nn.functional.l1_loss(generated_predictions, targets, reduction="mean")
-    ssim = structural_similarity_index_measure(
+    ssim = multiscale_structural_similarity_index_measure(
         preds=generated_predictions,
         target=targets,
         data_range=resolve_ssim_data_range(
@@ -86,6 +94,7 @@ def compute_l1_ssim_mean_components(
             targets=targets,
             data_range=data_range,
         ),
+        betas=MS_SSIM_BETAS_128,
     )
     ssim_loss = -1.0 * ssim
     total = l1 + ssim_weight * ssim_loss
@@ -122,15 +131,15 @@ def compute_ssim_loss_per_sample(
     targets: torch.Tensor,
     data_range: Optional[float] = None,
 ) -> torch.Tensor:
-    """Compute one ``-1 * SSIM`` value per sample.
+    """Compute one ``-1 * MS-SSIM`` value per sample.
 
     Args:
         generated_predictions: Model predictions.
         targets: Ground-truth targets with matching shape.
-        data_range: Optional fixed intensity range for SSIM.
+        data_range: Optional fixed intensity range for MS-SSIM.
 
     Returns:
-        Tensor of shape ``[batch_size]`` containing one SSIM-loss value per
+        Tensor of shape ``[batch_size]`` containing one MS-SSIM-loss value per
         sample.
 
     Raises:
@@ -141,7 +150,7 @@ def compute_ssim_loss_per_sample(
         generated_predictions=generated_predictions,
         targets=targets,
     )
-    per_sample_ssim = structural_similarity_index_measure(
+    per_sample_ssim = multiscale_structural_similarity_index_measure(
         preds=generated_predictions,
         target=targets,
         data_range=resolve_ssim_data_range(
@@ -150,6 +159,7 @@ def compute_ssim_loss_per_sample(
             data_range=data_range,
         ),
         reduction="none",
+        betas=MS_SSIM_BETAS_128,
     ).reshape(-1)
     finite_ssim = torch.where(
         torch.isfinite(per_sample_ssim),
