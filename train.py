@@ -17,6 +17,7 @@ import numpy as np
 import optuna
 import tifffile
 import torch
+from mlflow.entities import LoggedModel
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
@@ -26,8 +27,9 @@ from datasets.dataset_00.utils.CropCacheBuilder import (
     ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.L1SSIMLoss import L1SSIMLoss
-from metrics.L1SSIMLossMetric import L1SSIMLossMetric
+from losses.GammaWeightedL1Loss import GammaWeightedL1Loss
+from losses.gamma_weighted_l1 import resolve_loss_description
+from metrics.GammaWeightedL1LossMetric import GammaWeightedL1LossMetric
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
@@ -138,11 +140,14 @@ parser.add_argument(
 )
 parser.add_argument("--resume", type=int, choices=[0, 1], default=1)
 parser.add_argument("--parent-run-id", type=str, default=None)
+parser.add_argument("--init-model-id", type=str, default=None)
 args = parser.parse_args()
 if args.parent_run_id == "":
     args.parent_run_id = None
 if args.study_name == "":
     args.study_name = None
+if args.init_model_id == "":
+    args.init_model_id = None
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
@@ -256,6 +261,18 @@ class OptimizationManager:
         self.model_factory = model_factory
         self.trainer_kwargs = trainer_kwargs
 
+    @staticmethod
+    def _load_initialized_model(model: torch.nn.Module, init_model_id: str | None) -> torch.nn.Module:
+        """Optionally initialize a fresh local model from an MLflow logged model."""
+
+        if init_model_id is None:
+            return model
+
+        logged_model: LoggedModel = mlflow.get_logged_model(init_model_id)
+        pretrained_model = mlflow.pytorch.load_model(logged_model.model_uri)
+        model.load_state_dict(pretrained_model.state_dict(), strict=True)
+        return model
+
     def __call__(self, trial: optuna.trial.Trial):
         """Execute one Optuna trial and return objective loss.
 
@@ -266,18 +283,16 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
-        # Couple learning rate to batch size so Optuna searches a scaling factor
-        # while the derived rate stays within the previous learning-rate bounds.
+        # Keep learning rate coupled to batch size while using a narrower
+        # fine-tuning-friendly search range.
         batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
         lr_factor = trial.suggest_float(
             "lr_factor",
             1e-5,
-            1e-3 / math.sqrt(max_batch_size),
+            3e-4 / math.sqrt(max_batch_size),
             log=True,
         )
-        # Keep the auxiliary SSIM term meaningful without overwhelming the L1
-        # objective early in training.
-        ssim_weight = trial.suggest_float("ssim_weight", 1e-3, 1.0, log=True)
+        gamma = trial.suggest_float("gamma", 0.0, 2.0)
         lr = lr_factor * math.sqrt(batch_size)
         eval_batch_size = (
             batch_size
@@ -299,7 +314,10 @@ class OptimizationManager:
         self.trainer_kwargs["eval_train_dataloader"] = eval_train_dataloader
         self.trainer_kwargs["eval_val_dataloader"] = eval_val_dataloader
 
-        model = self.model_factory()
+        model = self._load_initialized_model(
+            model=self.model_factory(),
+            init_model_id=args.init_model_id,
+        )
         self.trainer_kwargs["model"] = model
 
         optimizer_params = {
@@ -308,10 +326,10 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1SSIMLoss(ssim_weight=ssim_weight)
-        # Keep checkpoint selection aligned with the normalized training objective
-        # while denormalized image-quality metrics continue to be logged separately.
-        loss_callbacks = L1SSIMLossMetric(ssim_weight=ssim_weight, device=device)
+        loss_trainer = GammaWeightedL1Loss(gamma=gamma)
+        # Keep checkpoint selection aligned with the gamma-weighted training
+        # objective while denormalized image-quality metrics continue to be logged.
+        loss_callbacks = GammaWeightedL1LossMetric(gamma=gamma, device=device)
         metrics = [
             L2(device=device),
             PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
@@ -329,10 +347,16 @@ class OptimizationManager:
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("lr_factor", lr_factor)
-            mlflow.log_param("ssim_weight", ssim_weight)
+            mlflow.log_param("lr", lr)
+            mlflow.log_param("gamma", gamma)
             mlflow.log_param("eval_batch_size", eval_batch_size)
             mlflow.log_param("eval_use_amp", int(eval_use_amp))
             mlflow.log_param("train_use_amp", int(train_use_amp))
+            mlflow.log_param("loss_epsilon", 1e-8)
+            mlflow.set_tag("loss_description", resolve_loss_description(gamma=gamma, epsilon=1e-8))
+            if args.init_model_id is not None:
+                mlflow.log_param("init_model_id", args.init_model_id)
+                mlflow.set_tag("initialization_source", "mlflow_model_id")
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
@@ -375,6 +399,8 @@ mlflow.log_param("requested_train_use_amp", int(train_use_amp))
 mlflow.log_param("optuna_storage", args.optuna_storage)
 mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
 mlflow.log_param("resume", args.resume)
+if args.init_model_id is not None:
+    mlflow.log_param("init_model_id", args.init_model_id)
 mlflow.log_param("amp_dtype", "bfloat16")
 mlflow.log_param("input_resolution", dataset_config.input_resolution)
 mlflow.log_param("target_resolution", dataset_config.target_resolution)
@@ -386,7 +412,7 @@ Optimization of a DAPI-to-Gold image-to-image translation model with:
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - No final activation function after the model output (such as sigmoid)
 - Train-split 1st/99th percentile normalization for inputs and targets
-- L1 plus Optuna-weighted MS-SSIM optimization objective in normalized space with denormalized L2, PSNR, SSIM, and Pearson correlation metric logging
+- Gamma-weighted absolute-error optimization objective in normalized space with fixed epsilon, Optuna-tuned gamma, and denormalized L2, PSNR, SSIM, and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
@@ -522,7 +548,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 300,
+    "early_stopping_counter_threshold": 30,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1

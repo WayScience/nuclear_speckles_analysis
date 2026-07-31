@@ -57,12 +57,14 @@ class EarlyStoppingAndCheckpointCallback(BaseCallback):
             self.best_loss_value = loss_value
             self.early_stopping_counter = 0
 
-            mlflow.pytorch.log_model(
+            model_info = mlflow.pytorch.log_model(
                 model,
                 name="model",
                 signature=signature,
                 step=epoch,
             )
+            if getattr(model_info, "model_id", None) is not None:
+                mlflow.set_tag("best_model_id", model_info.model_id)
             hook_data["continue_training"] = True
             return
 
