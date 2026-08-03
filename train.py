@@ -30,6 +30,7 @@ from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
 from losses.GammaWeightedL1Loss import GammaWeightedL1Loss
 from losses.gamma_weighted_l1 import resolve_loss_description
 from metrics.GammaWeightedL1LossMetric import GammaWeightedL1LossMetric
+from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
@@ -331,6 +332,7 @@ class OptimizationManager:
         # objective while denormalized image-quality metrics continue to be logged.
         loss_callbacks = GammaWeightedL1LossMetric(gamma=gamma, device=device)
         metrics = [
+            L1(device=device),
             L2(device=device),
             PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
             SSIM(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
