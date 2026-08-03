@@ -7,6 +7,9 @@ import torch
 from .save_utils import save_image_mlflow
 
 
+LOW_CONTRAST_EPSILON = 1e-6
+
+
 class SaveEpochCrops:
     """Save crop-level input/target/prediction images during training."""
 
@@ -135,6 +138,17 @@ class SaveEpochCrops:
         if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
             lower = float(np.min(pair_np))
             upper = float(np.max(pair_np))
+
+        prediction_np = prediction_image.detach().float().cpu().numpy()
+        prediction_lower = float(np.percentile(prediction_np, 1.0))
+        prediction_upper = float(np.percentile(prediction_np, 99.0))
+        if (
+            np.isfinite(prediction_lower)
+            and np.isfinite(prediction_upper)
+            and prediction_upper - prediction_lower < LOW_CONTRAST_EPSILON
+        ):
+            lower = float(self.image_postprocessor.target_lower_value)
+
         if lower >= upper:
             upper = lower + 1.0
         return lower, upper
