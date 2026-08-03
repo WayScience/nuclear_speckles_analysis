@@ -7,9 +7,6 @@ import torch
 from .save_utils import save_image_mlflow
 
 
-LOW_CONTRAST_EPSILON = 1e-6
-
-
 class SaveEpochCrops:
     """Save crop-level input/target/prediction images during training."""
 
@@ -122,37 +119,6 @@ class SaveEpochCrops:
         image = (image - lower) / (upper - lower)
         return (image * 255).byte().cpu().numpy()
 
-    def _compute_shared_pair_bounds(
-        self,
-        target_image: torch.Tensor,
-        prediction_image: torch.Tensor,
-    ) -> tuple[float, float]:
-        """Compute shared percentile bounds for one target/prediction pair."""
-
-        pair_values = torch.cat(
-            [target_image.detach().reshape(-1), prediction_image.detach().reshape(-1)]
-        )
-        pair_np = pair_values.float().cpu().numpy()
-        lower = float(np.percentile(pair_np, 1.0))
-        upper = float(np.percentile(pair_np, 99.0))
-        if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
-            lower = float(np.min(pair_np))
-            upper = float(np.max(pair_np))
-
-        prediction_np = prediction_image.detach().float().cpu().numpy()
-        prediction_lower = float(np.percentile(prediction_np, 1.0))
-        prediction_upper = float(np.percentile(prediction_np, 99.0))
-        if (
-            np.isfinite(prediction_lower)
-            and np.isfinite(prediction_upper)
-            and prediction_upper - prediction_lower < LOW_CONTRAST_EPSILON
-        ):
-            lower = float(self.image_postprocessor.target_lower_value)
-
-        if lower >= upper:
-            upper = lower + 1.0
-        return lower, upper
-
     def predict_target(self, image: torch.Tensor, model: torch.nn.Module) -> torch.Tensor:
         """Run model inference for one sample and apply postprocessing.
 
@@ -177,6 +143,11 @@ class SaveEpochCrops:
             epoch: Current epoch index used in artifact paths.
         """
 
+        target_display_bounds = (
+            float(self.image_postprocessor.target_lower_value),
+            float(self.image_postprocessor.target_upper_value),
+        )
+
         for sample_idx in self.image_dataset_idxs:
             sample = self.image_dataset[sample_idx]
             metadata = sample["metadata"]
@@ -197,10 +168,6 @@ class SaveEpochCrops:
             denormalized_prediction = self.image_postprocessor.denormalize_target(
                 generated_prediction
             )
-            pair_display_bounds = self._compute_shared_pair_bounds(
-                target_image=denormalized_target,
-                prediction_image=denormalized_prediction,
-            )
 
             self.save_image(
                 image_path=sample["target_path"],
@@ -208,7 +175,7 @@ class SaveEpochCrops:
                 image=denormalized_target,
                 metadata=metadata,
                 epoch=epoch,
-                display_bounds=pair_display_bounds,
+                display_bounds=target_display_bounds,
             )
             self.save_image(
                 image_path=sample["target_path"],
@@ -216,5 +183,5 @@ class SaveEpochCrops:
                 image=denormalized_prediction,
                 metadata=metadata,
                 epoch=epoch,
-                display_bounds=pair_display_bounds,
+                display_bounds=target_display_bounds,
             )
