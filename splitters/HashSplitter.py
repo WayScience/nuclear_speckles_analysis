@@ -1,3 +1,4 @@
+import pathlib
 from collections import defaultdict
 from typing import Tuple
 
@@ -8,7 +9,9 @@ from datasets.dataset_00.utils.Collator import collator
 
 
 class HashSplitter:
-    """Create deterministic dataset splits from hashed sample metadata IDs."""
+    """
+    Create datasplits by hashing sample metadata IDs
+    """
 
     def __init__(
         self,
@@ -47,18 +50,11 @@ class HashSplitter:
             else:
                 self.splits["test"].append(idx)
 
-    def build_loaders(
-        self,
-        batch_size: int,
-        train_shuffle: bool = True,
-    ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-        """Build dataloaders for existing train/validation/test splits.
+    def __call__(self, batch_size: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
+        """Build dataloaders for train/validation/test splits.
 
         Args:
             batch_size: Batch size for all returned dataloaders.
-            train_shuffle: Whether the training split loader should shuffle.
-                Set this to ``False`` when reusing the train split for
-                deterministic epoch-end evaluation.
 
         Returns:
             Tuple of ``(train_loader, val_loader, test_loader)``.
@@ -77,23 +73,9 @@ class HashSplitter:
                 collate_fn=collator,
             )
 
-        # Once subset loaders are built, downstream dataset access should return
-        # individual samples rather than pre-split collections.
         self.dataset.split_data = False
         return (
-            make_loader(self.splits["train"], shuffle=train_shuffle),
+            make_loader(self.splits["train"], shuffle=True),
             make_loader(self.splits["val"], shuffle=False),
             make_loader(self.splits["test"], shuffle=False),
         )
-
-    def __call__(self, batch_size: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
-        """Build dataloaders for train/validation/test splits.
-
-        Args:
-            batch_size: Batch size for all returned dataloaders.
-
-        Returns:
-            Tuple of ``(train_loader, val_loader, test_loader)``.
-        """
-
-        return self.build_loaders(batch_size=batch_size, train_shuffle=True)

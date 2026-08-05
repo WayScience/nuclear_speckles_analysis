@@ -7,10 +7,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import tifffile
-from skimage.transform import resize
-
-
-CROP_CACHE_VERSION = "5"
 
 
 @dataclass
@@ -24,38 +20,6 @@ class CropCacheResult:
 
     manifest_path: pathlib.Path
     image_specs: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class ResamplingGeometry:
-    """Geometry shared by full-image resampling and bbox coordinate remapping.
-
-    Attributes:
-        scale_factor: Isotropic resize factor computed as
-            ``input_resolution / target_resolution``.
-        resized_height: Height of the full image immediately after resizing.
-        resized_width: Width of the full image immediately after resizing.
-        output_height: Final centered crop/pad output height.
-        output_width: Final centered crop/pad output width.
-        crop_top: Top offset removed from the resized image during centered crop.
-        crop_left: Left offset removed from the resized image during centered crop.
-        pad_top: Zero-padding added above the centered crop result.
-        pad_bottom: Zero-padding added below the centered crop result.
-        pad_left: Zero-padding added left of the centered crop result.
-        pad_right: Zero-padding added right of the centered crop result.
-    """
-
-    scale_factor: float
-    resized_height: int
-    resized_width: int
-    output_height: int
-    output_width: int
-    crop_top: int
-    crop_left: int
-    pad_top: int
-    pad_bottom: int
-    pad_left: int
-    pad_right: int
 
 
 def _parse_image_filename(filename: str) -> tuple[str, str, str, str]:
@@ -171,215 +135,6 @@ def _compute_shifted_window(start: int, end: int, target_size: int, axis_limit: 
     return window_start, window_end
 
 
-def _build_resampling_geometry(
-    input_shape: tuple[int, int],
-    template_shape: tuple[int, int],
-    input_resolution: float,
-    target_resolution: float,
-) -> ResamplingGeometry:
-    """Compute centered crop/pad geometry for whole-image resampling.
-
-    The full source image is resized isotropically using
-    ``input_resolution / target_resolution``. The resized image is then mapped
-    onto the template field of view using a centered crop when the resized image
-    is larger than the template, or centered zero-padding when it is smaller.
-
-    Args:
-        input_shape: Source full-image shape as ``(height, width)``.
-        template_shape: Target full-image shape as ``(height, width)``.
-        input_resolution: Source microscope resolution in microns per pixel.
-        target_resolution: Target microscope resolution in microns per pixel.
-
-    Returns:
-        Geometry object containing resize dimensions and centered crop/pad
-        offsets used for both image warping and bbox coordinate transforms.
-
-    Raises:
-        ValueError: If either resolution is non-positive.
-    """
-
-    if input_resolution <= 0 or target_resolution <= 0:
-        raise ValueError(
-            "input_resolution and target_resolution must both be positive "
-            f"got input_resolution={input_resolution}, target_resolution={target_resolution}"
-        )
-
-    scale_factor = float(input_resolution) / float(target_resolution)
-    input_height, input_width = input_shape
-    output_height, output_width = template_shape
-
-    resized_height = max(1, int(round(input_height * scale_factor)))
-    resized_width = max(1, int(round(input_width * scale_factor)))
-
-    crop_top = max(0, (resized_height - output_height) // 2)
-    crop_left = max(0, (resized_width - output_width) // 2)
-
-    cropped_height = min(resized_height, output_height)
-    cropped_width = min(resized_width, output_width)
-
-    pad_total_y = max(0, output_height - cropped_height)
-    pad_total_x = max(0, output_width - cropped_width)
-    pad_top = pad_total_y // 2
-    pad_bottom = pad_total_y - pad_top
-    pad_left = pad_total_x // 2
-    pad_right = pad_total_x - pad_left
-
-    return ResamplingGeometry(
-        scale_factor=scale_factor,
-        resized_height=resized_height,
-        resized_width=resized_width,
-        output_height=output_height,
-        output_width=output_width,
-        crop_top=crop_top,
-        crop_left=crop_left,
-        pad_top=pad_top,
-        pad_bottom=pad_bottom,
-        pad_left=pad_left,
-        pad_right=pad_right,
-    )
-
-
-def _cast_resampled_image(image: np.ndarray, dtype: np.dtype) -> np.ndarray:
-    """Cast interpolated image values back to the source dtype.
-
-    Args:
-        image: Interpolated image array.
-        dtype: Original source dtype.
-
-    Returns:
-        Image array cast back to the source dtype. Integer dtypes are rounded
-        and clipped to the valid dtype range before casting.
-    """
-
-    if np.issubdtype(dtype, np.integer):
-        dtype_info = np.iinfo(dtype)
-        return np.clip(np.rint(image), dtype_info.min, dtype_info.max).astype(dtype)
-
-    return image.astype(dtype, copy=False)
-
-
-def _register_and_resample_full_image(
-    image: np.ndarray,
-    geometry: ResamplingGeometry,
-) -> np.ndarray:
-    """Resample a full image, then center-crop or pad it to template size.
-
-    Cubic interpolation is used for the isotropic resize so cached training
-    crops are generated from the same full-image geometry used for bbox
-    remapping. Interpolated values are cast back to the source dtype before the
-    centered crop/pad step so downstream cache metadata inference remains
-    compatible with integer TIFF inputs.
-
-    Args:
-        image: Source full image as a 2D array.
-        geometry: Shared resize and centered crop/pad geometry.
-
-    Returns:
-        Resampled 2D image with final shape
-        ``(geometry.output_height, geometry.output_width)``.
-    """
-
-    resized = resize(
-        image,
-        output_shape=(geometry.resized_height, geometry.resized_width),
-        order=3,
-        preserve_range=True,
-        anti_aliasing=False,
-    )
-    resized = _cast_resampled_image(resized, image.dtype)
-
-    cropped = resized[
-        geometry.crop_top : geometry.crop_top + min(geometry.resized_height, geometry.output_height),
-        geometry.crop_left : geometry.crop_left + min(geometry.resized_width, geometry.output_width),
-    ]
-
-    if (
-        geometry.pad_top
-        or geometry.pad_bottom
-        or geometry.pad_left
-        or geometry.pad_right
-    ):
-        cropped = np.pad(
-            cropped,
-            pad_width=(
-                (geometry.pad_top, geometry.pad_bottom),
-                (geometry.pad_left, geometry.pad_right),
-            ),
-            mode="constant",
-            constant_values=0,
-        )
-
-    return cropped
-
-
-def _transform_bbox_coordinates(
-    x0: int,
-    y0: int,
-    x1: int,
-    y1: int,
-    geometry: ResamplingGeometry,
-) -> tuple[int, int, int, int]:
-    """Map a bbox from original full-image coordinates into resampled image space.
-
-    Bounding-box minima use ``floor`` and maxima use ``ceil`` after scaling so
-    discretization does not shrink the box away from the original nucleus. The
-    same centered crop/pad offsets used for the resampled full image are then
-    applied to the bbox coordinates, followed by clamping to valid output
-    bounds.
-
-    Args:
-        x0: Original minimum x coordinate.
-        y0: Original minimum y coordinate.
-        x1: Original maximum x coordinate.
-        y1: Original maximum y coordinate.
-        geometry: Shared resize and centered crop/pad geometry.
-
-    Returns:
-        Transformed bbox coordinates as ``(x0, y0, x1, y1)`` in the final
-        resampled full-image coordinate system.
-    """
-
-    scaled_x0 = int(np.floor(x0 * geometry.scale_factor))
-    scaled_y0 = int(np.floor(y0 * geometry.scale_factor))
-    scaled_x1 = int(np.ceil(x1 * geometry.scale_factor))
-    scaled_y1 = int(np.ceil(y1 * geometry.scale_factor))
-
-    transformed_x0 = scaled_x0 - geometry.crop_left + geometry.pad_left
-    transformed_y0 = scaled_y0 - geometry.crop_top + geometry.pad_top
-    transformed_x1 = scaled_x1 - geometry.crop_left + geometry.pad_left
-    transformed_y1 = scaled_y1 - geometry.crop_top + geometry.pad_top
-
-    transformed_x0 = min(max(transformed_x0, 0), geometry.output_width)
-    transformed_y0 = min(max(transformed_y0, 0), geometry.output_height)
-    transformed_x1 = min(max(transformed_x1, 0), geometry.output_width)
-    transformed_y1 = min(max(transformed_y1, 0), geometry.output_height)
-
-    if transformed_x1 <= transformed_x0:
-        transformed_x1 = min(geometry.output_width, transformed_x0 + 1)
-        transformed_x0 = max(0, transformed_x1 - 1)
-    if transformed_y1 <= transformed_y0:
-        transformed_y1 = min(geometry.output_height, transformed_y0 + 1)
-        transformed_y0 = max(0, transformed_y1 - 1)
-
-    return transformed_x0, transformed_y0, transformed_x1, transformed_y1
-
-
-def _transform_point_coordinates(
-    x: float,
-    y: float,
-    geometry: ResamplingGeometry,
-) -> tuple[float, float]:
-    """Map a point from original full-image coordinates into resampled image space."""
-
-    transformed_x = (float(x) * geometry.scale_factor) - geometry.crop_left + geometry.pad_left
-    transformed_y = (float(y) * geometry.scale_factor) - geometry.crop_top + geometry.pad_top
-
-    transformed_x = min(max(transformed_x, 0.0), float(geometry.output_width))
-    transformed_y = min(max(transformed_y, 0.0), float(geometry.output_height))
-
-    return transformed_x, transformed_y
-
-
 def _build_filtered_profiles(
     parquet_path: pathlib.Path,
     metadata_column_map: dict[str, str] | None = None,
@@ -449,22 +204,6 @@ def _build_filtered_profiles(
         "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
         "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
     }
-    optional_center_candidates = {
-        "Metadata_Nuclei_Center_X": [
-            "Metadata_Nuclei_Center_X",
-            "Metadata_Nuclei_AreaShape_Center_X",
-            "Metadata_Nuclei_Location_Center_X",
-            "Nuclei_AreaShape_Center_X",
-            "Nuclei_Location_Center_X",
-        ],
-        "Metadata_Nuclei_Center_Y": [
-            "Metadata_Nuclei_Center_Y",
-            "Metadata_Nuclei_AreaShape_Center_Y",
-            "Metadata_Nuclei_Location_Center_Y",
-            "Nuclei_AreaShape_Center_Y",
-            "Nuclei_Location_Center_Y",
-        ],
-    }
     required_cols = required_metadata_cols | required_bbox_cols
 
     missing_metadata_cols = sorted(required_metadata_cols - common_columns)
@@ -491,31 +230,6 @@ def _build_filtered_profiles(
         if still_missing_bbox_cols:
             raise ValueError(f"Missing required profile columns: {still_missing_bbox_cols}")
 
-    resolved_optional_centers: dict[str, str] = {}
-    source_columns = list(scdf.columns)
-    common_columns = set(scdf.columns)
-    for canonical_col, candidates in optional_center_candidates.items():
-        if canonical_col in common_columns:
-            continue
-
-        matching_candidates = [candidate for candidate in candidates if candidate in common_columns]
-        if matching_candidates:
-            resolved_optional_centers[matching_candidates[0]] = canonical_col
-            continue
-
-        try:
-            source_column = _resolve_column_by_substring(
-                columns=source_columns,
-                required_name=canonical_col.removeprefix("Metadata_"),
-            )
-        except ValueError:
-            continue
-        resolved_optional_centers[source_column] = canonical_col
-
-    if resolved_optional_centers:
-        scdf = scdf.rename(columns=resolved_optional_centers)
-        common_columns = set(scdf.columns)
-
     keep_cols = [c for c in scdf.columns if c in common_columns and (c.startswith("Metadata_") or c in required_cols)]
     scdf = scdf[keep_cols].copy()
 
@@ -527,14 +241,6 @@ def _build_filtered_profiles(
     ]
     for col in bbox_cols:
         scdf[col] = scdf[col].astype(int)
-
-    center_cols = [
-        "Metadata_Nuclei_Center_X",
-        "Metadata_Nuclei_Center_Y",
-    ]
-    for col in center_cols:
-        if col in scdf.columns:
-            scdf[col] = scdf[col].astype(float)
 
     scdf["Nuclei_AreaShape_BoundingBoxDelta_X"] = (
         scdf["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X"]
@@ -552,27 +258,14 @@ def _build_filtered_profiles(
     return scdf.reset_index(drop=True)
 
 
-def _validate_manifest(
-    manifest_path: pathlib.Path,
-    crop_size: int,
-    input_resolution: float | None,
-    target_resolution: float | None,
-) -> tuple[bool, list[dict[str, str]]]:
+def _validate_manifest(manifest_path: pathlib.Path) -> tuple[bool, list[dict[str, str]]]:
     """Check whether an existing cache manifest can be reused safely.
 
     Args:
         manifest_path: Path to the cache CSV manifest.
-        crop_size: Requested fixed crop size.
-        input_resolution: Requested source microscope resolution.
-        target_resolution: Requested target microscope resolution.
 
     Returns:
         Tuple of (is_valid, rows). Rows are returned only when valid.
-
-    The manifest is reusable only when its cached crop layout, crop builder
-    version, source image selections, on-disk paths, and stored resolution
-    settings all match the current request. This forces a rebuild when
-    whole-image resampling or crop-generation behavior changes.
     """
 
     if not manifest_path.exists():
@@ -595,44 +288,22 @@ def _validate_manifest(
         "target_channel",
         "input_path",
         "target_path",
-        "crop_size",
-        "cache_version",
-        "input_resolution",
-        "target_resolution",
     }
     if not required_fields.issubset(rows[0].keys()):
         return False, []
 
     center_x_pattern = re.compile(r"(?:^|\|)center_x=-?\d+\.\d{6}(?:\||$)")
     center_y_pattern = re.compile(r"(?:^|\|)center_y=-?\d+\.\d{6}(?:\||$)")
-    requested_input_resolution = (
-        "" if input_resolution is None else f"{input_resolution:.6f}"
-    )
-    requested_target_resolution = (
-        "" if target_resolution is None else f"{target_resolution:.6f}"
-    )
-    requested_crop_size = str(int(crop_size))
 
     for row in rows:
         sample_id = row["sample_id"]
         if not center_x_pattern.search(sample_id) or not center_y_pattern.search(sample_id):
             return False, []
-        if row["cache_version"] != CROP_CACHE_VERSION:
-            return False, []
-        if row["crop_size"] != requested_crop_size:
-            return False, []
-        if row["input_resolution"] != requested_input_resolution:
-            return False, []
-        if row["target_resolution"] != requested_target_resolution:
-            return False, []
 
         # Reuse is only safe when paths and sample IDs still match on-disk files.
         input_path = pathlib.Path(row["input_path"])
         target_path = pathlib.Path(row["target_path"])
-        if (
-            not input_path.exists()
-            or not target_path.exists()
-        ):
+        if not input_path.exists() or not target_path.exists():
             return False, []
 
         is_legacy_layout = input_path.stem == sample_id and target_path.stem == sample_id
@@ -684,18 +355,8 @@ def ensure_dapi_to_gold_cache(
     target_channel: str,
     crop_size: int = 256,
     metadata_column_map: dict[str, str] | None = None,
-    input_resolution: float | None = None,
-    target_resolution: float | None = None,
 ) -> CropCacheResult:
     """Build or reuse a DAPI-to-Gold crop cache for configured channels.
-
-    When both ``input_resolution`` and ``target_resolution`` are provided, full
-    DAPI and Gold field-of-view images are resampled before any nucleus crop is
-    extracted. The resampled full images are matched to the target field of
-    view using a centered crop or centered zero-padding, and the original
-    CellProfiler bounding boxes are transformed through that same geometry
-    before crop extraction. When both resolutions are ``None``, cache building
-    follows the original direct-from-raw-image crop path.
 
     Args:
         image_dir: Directory containing source TIFF images.
@@ -707,19 +368,12 @@ def ensure_dapi_to_gold_cache(
             is normalized to uppercase before channel lookup and manifest writes.
         crop_size: Fixed square crop size in pixels for cached nucleus crops.
         metadata_column_map: Optional source-to-canonical metadata renaming map.
-        input_resolution: Source microscope resolution in microns per pixel.
-            Whole-image resampling is enabled only when this and
-            ``target_resolution`` are both provided.
-        target_resolution: Target microscope resolution in microns per pixel.
-            Whole-image resampling is enabled only when this and
-            ``input_resolution`` are both provided.
 
     Returns:
         Manifest path plus inferred image specs for training configuration.
 
     Raises:
-        ValueError: If crop sizing is invalid, resolution settings are only
-            partially configured, or no valid crop pairs can be produced.
+        ValueError: If no valid crop pairs can be produced.
     """
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -729,17 +383,8 @@ def ensure_dapi_to_gold_cache(
 
     if crop_size <= 0:
         raise ValueError(f"crop_size must be positive, got {crop_size}")
-    if (input_resolution is None) != (target_resolution is None):
-        raise ValueError(
-            "input_resolution and target_resolution must either both be set or both be None"
-        )
 
-    is_valid, existing_rows = _validate_manifest(
-        manifest_path=manifest_path,
-        crop_size=crop_size,
-        input_resolution=input_resolution,
-        target_resolution=target_resolution,
-    )
+    is_valid, existing_rows = _validate_manifest(manifest_path=manifest_path)
     if is_valid:
         # Fast path: manifest already points to valid, existing cached crops.
         return CropCacheResult(
@@ -785,22 +430,6 @@ def ensure_dapi_to_gold_cache(
             raise ValueError(
                 "Expected 2D DAPI image and Gold image after selecting a single z-crop."
             )
-        if dapi_img.shape != gold_img.shape:
-            raise ValueError(
-                "Expected DAPI and Gold full images to share the same field-of-view shape, "
-                f"got dapi_img.shape={dapi_img.shape}, gold_img.shape={gold_img.shape}"
-            )
-
-        geometry = None
-        if input_resolution is not None and target_resolution is not None:
-            geometry = _build_resampling_geometry(
-                input_shape=tuple(int(dim) for dim in dapi_img.shape),
-                template_shape=tuple(int(dim) for dim in gold_img.shape),
-                input_resolution=input_resolution,
-                target_resolution=target_resolution,
-            )
-            dapi_img = _register_and_resample_full_image(dapi_img, geometry=geometry)
-            gold_img = _register_and_resample_full_image(gold_img, geometry=geometry)
 
         image_df = image_df.copy()
         bbox_cols = [
@@ -811,26 +440,6 @@ def ensure_dapi_to_gold_cache(
         ]
         for col in bbox_cols:
             image_df[col] = image_df[col].astype(int)
-
-        if geometry is not None:
-            transformed_bboxes = image_df.apply(
-                lambda nucleus: _transform_bbox_coordinates(
-                    x0=int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X"]),
-                    y0=int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y"]),
-                    x1=int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X"]),
-                    y1=int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y"]),
-                    geometry=geometry,
-                ),
-                axis=1,
-                result_type="expand",
-            )
-            transformed_bboxes.columns = [
-                "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X",
-                "Metadata_Nuclei_AreaShape_BoundingBoxMinimum_Y",
-                "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_X",
-                "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
-            ]
-            image_df[transformed_bboxes.columns] = transformed_bboxes.astype(int)
 
         for _, nucleus in image_df.iterrows():
             x0 = int(nucleus["Metadata_Nuclei_AreaShape_BoundingBoxMinimum_X"])
@@ -864,25 +473,6 @@ def ensure_dapi_to_gold_cache(
             center_x = (x0 + x1) / 2
             center_y = (y0 + y1) / 2
 
-            cellprofiler_center_x = ""
-            cellprofiler_center_y = ""
-            if (
-                "Metadata_Nuclei_Center_X" in nucleus.index
-                and "Metadata_Nuclei_Center_Y" in nucleus.index
-                and pd.notna(nucleus["Metadata_Nuclei_Center_X"])
-                and pd.notna(nucleus["Metadata_Nuclei_Center_Y"])
-            ):
-                cp_center_x = float(nucleus["Metadata_Nuclei_Center_X"])
-                cp_center_y = float(nucleus["Metadata_Nuclei_Center_Y"])
-                if geometry is not None:
-                    cp_center_x, cp_center_y = _transform_point_coordinates(
-                        x=cp_center_x,
-                        y=cp_center_y,
-                        geometry=geometry,
-                    )
-                cellprofiler_center_x = f"{cp_center_x:.6f}"
-                cellprofiler_center_y = f"{cp_center_y:.6f}"
-
             sample_id = (
                 f"plate={plate_name}|well={well_name}|site={site_name}|center_x={center_x:.6f}|center_y={center_y:.6f}"
             )
@@ -910,12 +500,6 @@ def ensure_dapi_to_gold_cache(
                     "target_channel": target_channel,
                     "input_path": str(input_path.resolve()),
                     "target_path": str(target_path.resolve()),
-                    "crop_size": str(crop_size),
-                    "cache_version": CROP_CACHE_VERSION,
-                    "input_resolution": "" if input_resolution is None else f"{input_resolution:.6f}",
-                    "target_resolution": "" if target_resolution is None else f"{target_resolution:.6f}",
-                    "cellprofiler_center_x": cellprofiler_center_x,
-                    "cellprofiler_center_y": cellprofiler_center_y,
                 }
             )
 
@@ -935,12 +519,6 @@ def ensure_dapi_to_gold_cache(
                 "target_channel",
                 "input_path",
                 "target_path",
-                "crop_size",
-                "cache_version",
-                "input_resolution",
-                "target_resolution",
-                "cellprofiler_center_x",
-                "cellprofiler_center_y",
             ],
         )
         writer.writeheader()
