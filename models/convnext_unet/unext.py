@@ -37,7 +37,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
     ConvNeXtUNet model implementation leveraging the modular "block" and "stage",
     Simply initializes a un-pretrained ConvNeXtV2_tiny model from timm library,
     adapt it as a encoder for the UNet like architecture, and then initialize
-    a appropriate Decoder. Depth of model is fixed to 4 as the ConvNeXtV2_tiny
+    a appropriate Decoder. Depth of model is fixed to 4 as the ConvNeXtV2_tiny 
     encoder has 4 stages.
 
     This model class allows for 4 different decoder architectures:
@@ -52,7 +52,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
         out_channels: int,
         decoder_up_block: Literal['pixelshuffle', 'convt'] = 'convt',
         decoder_compute_block: Literal['convnext', 'conv2d'] = 'convnext',
-        act_type: ActivationType = 'none',
+        act_type: ActivationType = 'sigmoid',
         _num_units: Union[List[int], int] = 2
     ):
         """
@@ -62,12 +62,12 @@ class ConvNeXtUNet(BaseGeneratorModel):
         :param out_channels: Number of output channels.
         :param decoder_up_block: Type of up-sampling block to use in the decoder.
             Can be 'pixelshuffle' for PixelShuffle2DUpBlock or 'convt' for
-            ConvTrans2DUpBlock. Default is 'convt'.
+            ConvTrans2DUpBlock. Default is 'pixelshuffle'.
         :param decoder_compute_block: Type of computation block to use in the
             decoder. Can be 'convnext' for Conv2DConvNeXtBlock or 'conv2d' for
             Conv2DNormActBlock. Default is 'convnext'.
         :param act_type: Type of activation function to use in the output layer.
-            Default is 'none'.
+            Default is 'sigmoid'.
         :param _num_units: Number of computation units in each stage.
             Can be an integer for uniform number of units in all stages,
             or a list of integers specifying the number of units for each stage.
@@ -78,13 +78,13 @@ class ConvNeXtUNet(BaseGeneratorModel):
             out_channels=out_channels,
             out_activation=act_type,
         )
-
+        
         # timm implementation of the depth 4 ConvNeXtV2 model
         # with only down-sampling path, originally optimized
         # for tasks like image classification/object detection
         convnextv2_model = timm.create_model(
-            "convnextv2_tiny",
-            features_only=True,
+            "convnextv2_tiny", 
+            features_only=True, 
             pretrained=False
         )
         # replace the first convolutional layer to work with (N, in_channels, H, W)
@@ -112,7 +112,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
                 "Expected 'pixelshuffle' or 'convt'."
             )
         self._decoder_up_block = decoder_up_block
-
+        
         if decoder_compute_block == 'convnext':
             comp_block_handles = [Conv2DConvNeXtBlock] * (depth - 1)
         elif decoder_compute_block == 'conv2d':
@@ -123,7 +123,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
                 "Expected 'convnext' or 'conv2d'."
             )
         self._decoder_compute_block = decoder_compute_block
-
+        
         if isinstance(_num_units, int):
             comp_block_kwargs = [{'num_units': _num_units}] * (depth - 1)
         elif isinstance(_num_units, list):
@@ -161,7 +161,7 @@ class ConvNeXtUNet(BaseGeneratorModel):
         """
         Produce a JSON-serializable config sufficient to recreate this model.
         Includes class path, torch version, constructor args, and chosen block classes.
-        """
+        """        
         # Resolve block class paths for provenance
         if self._decoder_up_block == 'pixelshuffle':
             up_block_path = qualname(PixelShuffle2DUpBlock)
@@ -202,14 +202,14 @@ class ConvNeXtUNet(BaseGeneratorModel):
                 "_num_units": self._num_units_cfg,
             },
         }
-
+    
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "ConvNeXtUNet":
         """
         Recreate a UNet from a config produced by `to_config()`.
         Accepts either the full dict or just the "init" sub-dict.
         """
-
+        
         init_cfg = config.get("init", config)
 
         return cls(**init_cfg)
