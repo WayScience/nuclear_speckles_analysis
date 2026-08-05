@@ -19,6 +19,7 @@ entry_points:
       checkpoint_root: {type: str, default: "trial_checkpoints"}
       resume: {type: int, default: 1}
       parent_run_id: {type: str, default: ""}
+      init_model_id: {type: str, default: ""}
     command: >
       uv run train.py
       --dataset {dataset}
@@ -37,3 +38,4 @@ entry_points:
       --checkpoint-root {checkpoint_root}
       --resume {resume}
       --parent-run-id {parent_run_id}
+      --init-model-id {init_model_id}
