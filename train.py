@@ -1,4 +1,11 @@
+"""Train and optimize DAPI-to-Gold image-to-image models.
+
+This script prepares cached crop datasets, builds deterministic data splits,
+launches Optuna trials, and logs run metadata and artifacts with MLflow.
+"""
+
 import argparse
+import math
 import pathlib
 import random
 from dataclasses import dataclass
@@ -8,27 +15,30 @@ import joblib
 import mlflow
 import numpy as np
 import optuna
+import tifffile
 import torch
-from models.convnext_unet.unext import ConvNeXtUNet
+from mlflow.entities import LoggedModel
 
 from callbacks.CallbackPipeline import CallbackPipeline
 from callbacks.utils.SampleImages import SampleImages
 from callbacks.utils.SaveEpochCrops import SaveEpochCrops
 from datasets.dataset_00.CellCropToCropDataset import CellCropToCropDataset
 from datasets.dataset_00.utils.CropCacheBuilder import (
-    ensure_dapi_to_gold_cache,
-    load_cache_manifest,
-)
+    ensure_dapi_to_gold_cache, load_cache_manifest)
 from datasets.dataset_00.utils.ImagePostProcessor import ImagePostProcessor
 from datasets.dataset_00.utils.ImagePreProcessor import ImagePreProcessor
-from losses.L1Loss import L1Loss
+from losses.GammaWeightedL1Loss import GammaWeightedL1Loss
+from losses.gamma_weighted_l1 import resolve_loss_description
+from metrics.GammaWeightedL1LossMetric import GammaWeightedL1LossMetric
 from metrics.L1 import L1
 from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
+from models.convnext_unet.unext import ConvNeXtUNet
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -42,6 +52,13 @@ class DatasetConfig:
         target_channel: Target channel name used for supervision crop selection.
         metadata_column_map: Optional source-to-canonical metadata renaming map
             applied before crop cache generation.
+        holdout_plate: Optional plate identifier removed before train/val splits.
+        input_resolution: Optional source microscope resolution in microns per
+            pixel. Whole-image resampling is enabled only when this and
+            ``target_resolution`` are both provided.
+        target_resolution: Optional target microscope resolution in microns per
+            pixel. Whole-image resampling is enabled only when this and
+            ``input_resolution`` are both provided.
     """
 
     image_dir: pathlib.Path
@@ -51,19 +68,24 @@ class DatasetConfig:
     target_channel: str
     metadata_column_map: dict[str, str] | None = None
     holdout_plate: str | None = None
+    input_resolution: float | None = None
+    target_resolution: float | None = None
 
+
+# Shared root for dataset-specific image directories, profiles, and caches.
+speckle_dataset_path = pathlib.Path("/mnt/big_drive/nuclear_speckle_data").resolve(
+    strict=True
+)
+u2os_dataset_path = speckle_dataset_path / "u20s_dataset_jan_15_2026"
+initial_dataset_path = speckle_dataset_path / "initial_dataset"
 
 DATASET_CONFIGS = {
+    # Only U2OS currently uses microscope-resolution harmonization before crop caching.
     "u2os": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_images/tiffs"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/u20s_dataset_jan_15_2026/model_cache"
-        ),
+        image_dir=u2os_dataset_path / "u20s_images/tiffs",
+        parquet_path=u2os_dataset_path
+        / "u20s_profiles/single_cell_profiles/u2os_per_nuclei_sc_feature_selected.parquet",
+        cache_root=u2os_dataset_path / "model_cache",
         input_channel="CH01",
         target_channel="CH03",
         metadata_column_map={
@@ -71,17 +93,13 @@ DATASET_CONFIGS = {
             "Metadata_Position": "Metadata_Site",
         },
         holdout_plate="Rep3",
+        input_resolution=2.74,
+        target_resolution=6.45,
     ),
     "initial": DatasetConfig(
-        image_dir=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/IC_corrected_images"
-        ),
-        parquet_path=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/Preprocessed_data/cleaned_sc_profiles"
-        ),
-        cache_root=pathlib.Path(
-            "/mnt/big_drive/nuclear_speckle_data/initial_dataset/model_cache"
-        ),
+        image_dir=initial_dataset_path / "IC_corrected_images",
+        parquet_path=initial_dataset_path / "Preprocessed_data/cleaned_sc_profiles",
+        cache_root=initial_dataset_path / "model_cache",
         input_channel="CH0",
         target_channel="CH2",
         metadata_column_map={
@@ -94,6 +112,8 @@ DATASET_CONFIGS = {
             "Nuclei_AreaShape_BoundingBoxMaximum_Y": "Metadata_Nuclei_AreaShape_BoundingBoxMaximum_Y",
         },
         holdout_plate="slide2",
+        input_resolution=None,
+        target_resolution=None,
     ),
 }
 
@@ -103,15 +123,113 @@ parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--n-trials", type=int, default=4)
 parser.add_argument("--max-train-batches", type=int, default=-1)
 parser.add_argument("--max-eval-batches", type=int, default=-1)
+# Evaluation can use a different batch size than optimization to make
+# epoch-end metric passes easier to fit on available hardware.
+parser.add_argument("--eval-batch-size", type=int, default=-1)
+parser.add_argument("--eval-use-amp", type=int, choices=[0, 1], default=0)
+parser.add_argument("--train-use-amp", type=int, choices=[0, 1], default=1)
 parser.add_argument("--enable-image-savers", type=int, choices=[0, 1], default=1)
 parser.add_argument("--batch-metric-log-every-n", type=int, default=1)
 parser.add_argument("--dataset", choices=sorted(DATASET_CONFIGS.keys()), default="u2os")
 parser.add_argument("--crop-size", type=int, default=256)
+# Study metadata is passed through to Optuna storage so repeated runs can target
+# a stable study name and backing database.
+parser.add_argument("--study-name", type=str, default=None)
+parser.add_argument("--optuna-storage", type=str, default="sqlite:///optuna_study.db")
+parser.add_argument(
+    "--checkpoint-root", type=pathlib.Path, default=pathlib.Path("trial_checkpoints")
+)
+parser.add_argument("--resume", type=int, choices=[0, 1], default=1)
+parser.add_argument("--parent-run-id", type=str, default=None)
+parser.add_argument("--init-model-id", type=str, default=None)
 args = parser.parse_args()
+if args.parent_run_id == "":
+    args.parent_run_id = None
+if args.study_name == "":
+    args.study_name = None
+if args.init_model_id == "":
+    args.init_model_id = None
 
 # Interpret non-positive limits as "use the full epoch" for trainer/eval loops.
 max_train_batches = None if args.max_train_batches <= 0 else args.max_train_batches
 max_eval_batches = None if args.max_eval_batches <= 0 else args.max_eval_batches
+requested_eval_batch_size = None if args.eval_batch_size <= 0 else args.eval_batch_size
+eval_use_amp = args.eval_use_amp == 1
+train_use_amp = args.train_use_amp == 1
+max_batch_size = 8
+
+
+def compute_training_image_stats(
+    manifest_rows: list[dict[str, str]],
+    train_indices: list[int],
+    input_lower_percentile: float,
+    input_upper_percentile: float,
+    target_lower_percentile: float,
+    target_upper_percentile: float,
+) -> dict[str, float]:
+    """Compute train-split robust percentile bounds for normalization.
+
+    Args:
+        manifest_rows: Full manifest rows backing the crop dataset.
+        train_indices: Dataset indices assigned to the training split.
+
+    Returns:
+        Dictionary containing train-split input/target percentile bounds.
+
+    Raises:
+        ValueError: If the training split is empty or any percentile bounds collapse.
+    """
+
+    if not train_indices:
+        raise ValueError(
+            "Training split is empty; cannot compute percentile statistics."
+        )
+
+    input_pixels: list[np.ndarray] = []
+    target_pixels: list[np.ndarray] = []
+
+    for idx in train_indices:
+        sample = manifest_rows[idx]
+        input_image = tifffile.imread(sample["input_path"])
+        target_image = tifffile.imread(sample["target_path"])
+
+        input_pixels.append(input_image.reshape(-1).astype(np.float32, copy=False))
+        target_pixels.append(target_image.reshape(-1).astype(np.float32, copy=False))
+
+    input_pixels_concat = np.concatenate(input_pixels)
+    target_pixels_concat = np.concatenate(target_pixels)
+
+    input_lower_value = float(
+        np.percentile(input_pixels_concat, input_lower_percentile)
+    )
+    input_upper_value = float(
+        np.percentile(input_pixels_concat, input_upper_percentile)
+    )
+    target_lower_value = float(
+        np.percentile(target_pixels_concat, target_lower_percentile)
+    )
+    target_upper_value = float(
+        np.percentile(target_pixels_concat, target_upper_percentile)
+    )
+
+    if (
+        input_lower_value >= input_upper_value
+        or target_lower_value >= target_upper_value
+    ):
+        raise ValueError(
+            "Training-split percentile bounds must be strictly increasing."
+        )
+
+    return {
+        "input_lower_percentile": input_lower_percentile,
+        "input_upper_percentile": input_upper_percentile,
+        "input_percentile_lower_value": input_lower_value,
+        "input_percentile_upper_value": input_upper_value,
+        "target_lower_percentile": target_lower_percentile,
+        "target_upper_percentile": target_upper_percentile,
+        "target_percentile_lower_value": target_lower_value,
+        "target_percentile_upper_value": target_upper_value,
+    }
 
 
 class OptimizationManager:
@@ -144,6 +262,18 @@ class OptimizationManager:
         self.model_factory = model_factory
         self.trainer_kwargs = trainer_kwargs
 
+    @staticmethod
+    def _load_initialized_model(model: torch.nn.Module, init_model_id: str | None) -> torch.nn.Module:
+        """Optionally initialize a fresh local model from an MLflow logged model."""
+
+        if init_model_id is None:
+            return model
+
+        logged_model: LoggedModel = mlflow.get_logged_model(init_model_id)
+        pretrained_model = mlflow.pytorch.load_model(logged_model.model_uri)
+        model.load_state_dict(pretrained_model.state_dict(), strict=True)
+        return model
+
     def __call__(self, trial: optuna.trial.Trial):
         """Execute one Optuna trial and return objective loss.
 
@@ -154,16 +284,41 @@ class OptimizationManager:
             Best validation loss reported by the trainer.
         """
 
-        # Let Optuna choose a mini-batch size and learning rate for this trial.
-        batch_size = trial.suggest_int("batch_size", 1, 8)
-        lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        # Keep learning rate coupled to batch size while using a narrower
+        # fine-tuning-friendly search range.
+        batch_size = trial.suggest_int("batch_size", 1, max_batch_size)
+        lr_factor = trial.suggest_float(
+            "lr_factor",
+            1e-5,
+            3e-4 / math.sqrt(max_batch_size),
+            log=True,
+        )
+        gamma = trial.suggest_float("gamma", 0.0, 2.0)
+        lr = lr_factor * math.sqrt(batch_size)
+        eval_batch_size = (
+            batch_size
+            if requested_eval_batch_size is None
+            else requested_eval_batch_size
+        )
 
-        # Rebuild train/val loaders at the chosen batch size while keeping deterministic splits.
+        # Optimization can tune the training batch size without forcing the same
+        # setting on epoch-end evaluation passes.
         train_dataloader, val_dataloader, _ = self.hash_splitter(batch_size=batch_size)
+        eval_train_dataloader, eval_val_dataloader, _ = (
+            self.hash_splitter.build_loaders(
+                batch_size=eval_batch_size,
+                train_shuffle=False,
+            )
+        )
         self.trainer_kwargs["train_dataloader"] = train_dataloader
         self.trainer_kwargs["val_dataloader"] = val_dataloader
+        self.trainer_kwargs["eval_train_dataloader"] = eval_train_dataloader
+        self.trainer_kwargs["eval_val_dataloader"] = eval_val_dataloader
 
-        model = self.model_factory()
+        model = self._load_initialized_model(
+            model=self.model_factory(),
+            init_model_id=args.init_model_id,
+        )
         self.trainer_kwargs["model"] = model
 
         optimizer_params = {
@@ -172,12 +327,15 @@ class OptimizationManager:
             "betas": (0.5, 0.999),
         }
 
-        loss_trainer = L1Loss()
-        loss_callbacks = L1(device=device)
+        loss_trainer = GammaWeightedL1Loss(gamma=gamma)
+        # Keep checkpoint selection aligned with the gamma-weighted training
+        # objective while denormalized image-quality metrics continue to be logged.
+        loss_callbacks = GammaWeightedL1LossMetric(gamma=gamma, device=device)
         metrics = [
+            L1(device=device),
             L2(device=device),
-            PSNR(device=device, max_pixel_value=1.0),
-            SSIM(device=device, max_pixel_value=1.0),
+            PSNR(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
+            SSIM(device=device, max_pixel_value=image_specs["target_max_pixel_value"]),
             PearsonCorrelation(device=device),
         ]
 
@@ -190,6 +348,17 @@ class OptimizationManager:
             del opt_params["params"]
             mlflow.log_params({f"optimizer_{k}": v for k, v in opt_params.items()})
             mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("lr_factor", lr_factor)
+            mlflow.log_param("lr", lr)
+            mlflow.log_param("gamma", gamma)
+            mlflow.log_param("eval_batch_size", eval_batch_size)
+            mlflow.log_param("eval_use_amp", int(eval_use_amp))
+            mlflow.log_param("train_use_amp", int(train_use_amp))
+            mlflow.log_param("loss_epsilon", 1e-8)
+            mlflow.set_tag("loss_description", resolve_loss_description(gamma=gamma, epsilon=1e-8))
+            if args.init_model_id is not None:
+                mlflow.log_param("init_model_id", args.init_model_id)
+                mlflow.set_tag("initialization_source", "mlflow_model_id")
             mlflow.set_tag("optimizer_class", optimizer.__class__.__name__.lower())
 
             self.trainer_kwargs["callbacks"] = CallbackPipeline(
@@ -216,6 +385,8 @@ if args.crop_size <= 0:
 
 # Keep all random sources fixed so trial-to-trial differences come from hyperparameters.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if train_use_amp and device.type == "cuda" and not torch.cuda.is_bf16_supported():
+    raise ValueError("train_use_amp requires CUDA bfloat16 support on this device.")
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -224,13 +395,26 @@ mlflow.log_param("dataset", args.dataset)
 mlflow.log_param("input_channel", dataset_config.input_channel)
 mlflow.log_param("target_channel", dataset_config.target_channel)
 mlflow.log_param("crop_size", args.crop_size)
+mlflow.log_param("requested_eval_batch_size", args.eval_batch_size)
+mlflow.log_param("requested_eval_use_amp", int(eval_use_amp))
+mlflow.log_param("requested_train_use_amp", int(train_use_amp))
+mlflow.log_param("optuna_storage", args.optuna_storage)
+mlflow.log_param("checkpoint_root", str(args.checkpoint_root))
+mlflow.log_param("resume", args.resume)
+if args.init_model_id is not None:
+    mlflow.log_param("init_model_id", args.init_model_id)
+mlflow.log_param("amp_dtype", "bfloat16")
+mlflow.log_param("input_resolution", dataset_config.input_resolution)
+mlflow.log_param("target_resolution", dataset_config.target_resolution)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
 - ConvNeXtUNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
-- L1 optimization objective with L2, PSNR, SSIM, and Pearson correlation metric logging
+- No final activation function after the model output (such as sigmoid)
+- Train-split 1st/99th percentile normalization for inputs and targets
+- Gamma-weighted absolute-error optimization objective in normalized space with fixed epsilon, Optuna-tuned gamma, and denormalized L2, PSNR, SSIM, and Pearson correlation metric logging
 """
 mlflow.set_tag("mlflow.note.content", description)
 
@@ -244,13 +428,17 @@ cache_result = ensure_dapi_to_gold_cache(
     target_channel=dataset_config.target_channel,
     crop_size=args.crop_size,
     metadata_column_map=dataset_config.metadata_column_map,
+    input_resolution=dataset_config.input_resolution,
+    target_resolution=dataset_config.target_resolution,
 )
 manifest_nuclei = load_cache_manifest(manifest_path=cache_result.manifest_path)
 manifest_nuclei_before_holdout_filter = len(manifest_nuclei)
 if dataset_config.holdout_plate is not None:
     # Keep one plate fully held out to prevent leakage across similar acquisition batches.
     manifest_nuclei = [
-        nuclei for nuclei in manifest_nuclei if nuclei.get("plate") != dataset_config.holdout_plate
+        nuclei
+        for nuclei in manifest_nuclei
+        if nuclei.get("plate") != dataset_config.holdout_plate
     ]
 manifest_nuclei_after_holdout_filter = len(manifest_nuclei)
 
@@ -272,8 +460,60 @@ image_specs = cache_result.image_specs
 mlflow.log_param("input_max_pixel_value", image_specs["input_max_pixel_value"])
 mlflow.log_param("target_max_pixel_value", image_specs["target_max_pixel_value"])
 
+bootstrap_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
+
+bootstrap_dataset = CellCropToCropDataset(
+    manifest_rows=manifest_nuclei,
+    image_specs=image_specs,
+    image_preprocessor=bootstrap_preprocessor,
+    image_cache_path=tensor_cache_path,
+)
+
+# HashSplitter uses metadata-derived IDs, so splits stay stable across reruns.
+bootstrap_hash_splitter = HashSplitter(
+    dataset=bootstrap_dataset,
+    train_frac=0.825,
+    val_frac=0.125,
+)
+bootstrap_hash_splitter.split_by_hash()
+input_lower_percentile = 1.0
+input_upper_percentile = 99.0
+target_lower_percentile = 1.0
+target_upper_percentile = 99.0
+training_stats = compute_training_image_stats(
+    manifest_rows=manifest_nuclei,
+    train_indices=bootstrap_hash_splitter.splits["train"],
+    input_lower_percentile=input_lower_percentile,
+    input_upper_percentile=input_upper_percentile,
+    target_lower_percentile=target_lower_percentile,
+    target_upper_percentile=target_upper_percentile,
+)
+image_specs = image_specs | training_stats
+
+mlflow.log_param("input_lower_percentile", image_specs["input_lower_percentile"])
+mlflow.log_param("input_upper_percentile", image_specs["input_upper_percentile"])
+mlflow.log_param(
+    "input_percentile_lower_value", image_specs["input_percentile_lower_value"]
+)
+mlflow.log_param(
+    "input_percentile_upper_value", image_specs["input_percentile_upper_value"]
+)
+mlflow.log_param("target_lower_percentile", image_specs["target_lower_percentile"])
+mlflow.log_param("target_upper_percentile", image_specs["target_upper_percentile"])
+mlflow.log_param(
+    "target_percentile_lower_value", image_specs["target_percentile_lower_value"]
+)
+mlflow.log_param(
+    "target_percentile_upper_value", image_specs["target_percentile_upper_value"]
+)
+
 image_preprocessor = ImagePreProcessor(image_specs=image_specs, device=device)
-image_postprocessor = ImagePostProcessor()
+image_postprocessor = ImagePostProcessor(
+    input_lower_value=image_specs["input_percentile_lower_value"],
+    input_upper_value=image_specs["input_percentile_upper_value"],
+    target_lower_value=image_specs["target_percentile_lower_value"],
+    target_upper_value=image_specs["target_percentile_upper_value"],
+)
 
 crop_image_dataset = CellCropToCropDataset(
     manifest_rows=manifest_nuclei,
@@ -282,7 +522,6 @@ crop_image_dataset = CellCropToCropDataset(
     image_cache_path=tensor_cache_path,
 )
 
-# HashSplitter uses metadata-derived IDs, so splits stay stable across reruns.
 hash_splitter = HashSplitter(
     dataset=crop_image_dataset,
     train_frac=0.825,
@@ -311,7 +550,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 5,
+    "early_stopping_counter_threshold": 300,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1
@@ -320,8 +559,11 @@ callbacks_args = {
     "image_postprocessor": image_postprocessor,
     "batch_metric_log_every_n": args.batch_metric_log_every_n,
     "max_eval_batches": max_eval_batches,
+    "eval_use_amp": eval_use_amp,
 }
 
+# The trainer optimizes with one loader pair while callbacks can use separate,
+# non-shuffled loaders for more stable epoch-end metric aggregation.
 optimization_manager = OptimizationManager(
     trainer=UNetTrainer,
     hash_splitter=hash_splitter,
@@ -332,11 +574,18 @@ optimization_manager = OptimizationManager(
         out_channels=1,
         decoder_up_block="convt",
     ),
+    device=device,
     epochs=args.epochs,
+    use_amp=train_use_amp,
     max_train_batches=max_train_batches,
 )
 
-study = optuna.create_study(study_name="model_training", direction="minimize")
+study = optuna.create_study(
+    study_name=args.study_name,
+    direction="minimize",
+    storage=args.optuna_storage,
+    load_if_exists=args.resume == 1,
+)
 study.optimize(optimization_manager, n_trials=args.n_trials)
 
 joblib.dump(study, "optuna_study.joblib")

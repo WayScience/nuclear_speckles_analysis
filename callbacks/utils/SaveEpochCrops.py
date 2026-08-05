@@ -40,15 +40,18 @@ class SaveEpochCrops:
         image: torch.Tensor,
         metadata: dict[str, Any],
         epoch: int,
+        display_bounds: tuple[float, float] | None = None,
     ) -> None:
-        """Convert a tensor image to uint8 and log it as an MLflow artifact.
+        """Convert a denormalized tensor image to uint8 and log it as an artifact.
 
         Args:
             image_path: Source path used to derive filename metadata.
             image_type: Prefix describing the image role (input/target/prediction).
-            image: Image tensor with shape ``(H, W)`` or ``(1, H, W)``.
+            image: Denormalized image tensor with shape ``(H, W)`` or ``(1, H, W)``.
             metadata: Per-image metadata used for artifact path construction.
             epoch: Current epoch index used in artifact paths.
+            display_bounds: Optional lower/upper clipping bounds applied before
+                uint8 rescaling.
 
         Raises:
             ValueError: If image is not convertible to a single 2D crop.
@@ -60,8 +63,7 @@ class SaveEpochCrops:
         if image.ndim != 2:
             raise ValueError(f"Expected image shape (H, W), got {tuple(image.shape)}")
 
-        image = image.clamp(0.0, 1.0)
-        image_np = (image * 255).byte().cpu().numpy()
+        image_np = self._to_display_uint8(image=image, display_bounds=display_bounds)
 
         if np.max(image_np) == 0:
             return
@@ -83,6 +85,40 @@ class SaveEpochCrops:
             image_filename=image_filename,
         )
 
+    def _compute_percentile_bounds(
+        self,
+        image: torch.Tensor,
+        lower_percentile: float = 1.0,
+        upper_percentile: float = 99.0,
+    ) -> tuple[float, float]:
+        """Compute robust display bounds from one denormalized image tensor."""
+
+        image_np = image.detach().float().cpu().numpy()
+        lower = float(np.percentile(image_np, lower_percentile))
+        upper = float(np.percentile(image_np, upper_percentile))
+        if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+            lower = float(np.min(image_np))
+            upper = float(np.max(image_np))
+        if lower >= upper:
+            upper = lower + 1.0
+        return lower, upper
+
+    def _to_display_uint8(
+        self,
+        image: torch.Tensor,
+        display_bounds: tuple[float, float] | None = None,
+    ) -> np.ndarray:
+        """Clip a denormalized image and rescale it to displayable uint8 values."""
+
+        lower, upper = (
+            self._compute_percentile_bounds(image=image)
+            if display_bounds is None
+            else display_bounds
+        )
+        image = image.detach().float().clamp(lower, upper)
+        image = (image - lower) / (upper - lower)
+        return (image * 255).byte().cpu().numpy()
+
     def predict_target(self, image: torch.Tensor, model: torch.nn.Module) -> torch.Tensor:
         """Run model inference for one sample and apply postprocessing.
 
@@ -94,9 +130,10 @@ class SaveEpochCrops:
             Postprocessed prediction tensor.
         """
 
+        model_device = next(model.parameters()).device
         with torch.no_grad():
-            prediction = model(image.unsqueeze(0)).squeeze(0)
-        return self.image_postprocessor(prediction)
+            prediction = model(image.unsqueeze(0).to(model_device)).squeeze(0)
+        return self.image_postprocessor(prediction).detach().cpu()
 
     def __call__(self, model: torch.nn.Module, epoch: int) -> None:
         """Save input, target, and generated prediction images for one epoch.
@@ -106,31 +143,45 @@ class SaveEpochCrops:
             epoch: Current epoch index used in artifact paths.
         """
 
+        target_display_bounds = (
+            float(self.image_postprocessor.target_lower_value),
+            float(self.image_postprocessor.target_upper_value),
+        )
+
         for sample_idx in self.image_dataset_idxs:
             sample = self.image_dataset[sample_idx]
             metadata = sample["metadata"]
+            denormalized_input = self.image_postprocessor.denormalize_input(sample["input"])
+            denormalized_target = self.image_postprocessor.denormalize_target(sample["target"])
+            input_display_bounds = self._compute_percentile_bounds(image=denormalized_input)
 
             self.save_image(
                 image_path=sample["input_path"],
                 image_type="input",
-                image=sample["input"],
+                image=denormalized_input,
                 metadata=metadata,
                 epoch=epoch,
+                display_bounds=input_display_bounds,
+            )
+
+            generated_prediction = self.predict_target(image=sample["input"], model=model)
+            denormalized_prediction = self.image_postprocessor.denormalize_target(
+                generated_prediction
             )
 
             self.save_image(
                 image_path=sample["target_path"],
                 image_type="target",
-                image=sample["target"],
+                image=denormalized_target,
                 metadata=metadata,
                 epoch=epoch,
+                display_bounds=target_display_bounds,
             )
-
-            generated_prediction = self.predict_target(image=sample["input"], model=model)
             self.save_image(
                 image_path=sample["target_path"],
                 image_type="generated_prediction",
-                image=generated_prediction,
+                image=denormalized_prediction,
                 metadata=metadata,
                 epoch=epoch,
+                display_bounds=target_display_bounds,
             )
