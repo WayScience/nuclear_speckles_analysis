@@ -32,7 +32,7 @@ from metrics.L2 import L2
 from metrics.PearsonCorrelation import PearsonCorrelation
 from metrics.PSNR import PSNR
 from metrics.SSIM import SSIM
-from models.convnext_unet.unext import ConvNeXtUNet
+from models.unet.UNet import UNet
 from splitters.HashSplitter import HashSplitter
 from trainers.UNetTrainer import UNetTrainer
 
@@ -381,7 +381,7 @@ mlflow.log_param("target_resolution", dataset_config.target_resolution)
 
 description = """
 Optimization of a DAPI-to-Gold image-to-image translation model with:
-- ConvNeXtUNet Generator
+- UNet Generator
 - Single 2D crop input and single 2D crop target
 - Cache-backed filtered nucleus crops generated from the configured data directory
 - No final activation function after the model output (such as sigmoid)
@@ -522,7 +522,7 @@ val_image_prediction_saver = SaveEpochCrops(
 )
 
 callbacks_args = {
-    "early_stopping_counter_threshold": 300,
+    "early_stopping_counter_threshold": 30,
     "image_savers": (
         [train_image_prediction_saver, val_image_prediction_saver]
         if args.enable_image_savers == 1
@@ -541,11 +541,7 @@ optimization_manager = OptimizationManager(
     hash_splitter=hash_splitter,
     dataset=crop_image_dataset,
     callbacks_args=callbacks_args,
-    model_factory=lambda: ConvNeXtUNet(
-        in_channels=1,
-        out_channels=1,
-        decoder_up_block="convt",
-    ),
+    model_factory=lambda: UNet(in_channels=1, out_channels=1),
     device=device,
     epochs=args.epochs,
     use_amp=train_use_amp,
